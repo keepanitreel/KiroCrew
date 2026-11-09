@@ -399,6 +399,7 @@ async def test_a_codex_chat_lists_global_steering_as_not_reaching_it(home, monke
         "applies": "always",
         "reaches": "no",
         "reason": "harness_has_no_path",
+        "switch": "none",
     }
 
 
@@ -430,3 +431,100 @@ async def test_a_channel_linked_chat_lists_its_own_project(home, tmp_path, monke
 async def test_an_app_cannot_read_a_slot_it_does_not_own(home):
     status, _data = await _get(_state(_ChatSlot("main")), "main", app_name="some-app")
     assert status == 404
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "native_steering"), [(PROVIDER_ACP, False), (PROVIDER_ACP, True)]
+)
+def test_no_row_is_switchable_on_a_harness_that_loads_steering_itself(
+    home, tmp_path, monkeypatch, provider_type, native_steering
+):
+    """kiro-cli and KAS can load a file Crew also writes, so no switch is offered."""
+    from kiro_crew import context as ctx
+
+    monkeypatch.setattr(ctx.acp_driver, "inherits_default_resources", lambda _p: False)
+    project = tmp_path / "project"
+    agents_md = _write(project / "AGENTS.md", "# Agents\n")
+    own = _write(tmp_path / "standards" / "own.md", "# Own\n")
+    rows = plan.chat_steering_plan(
+        listed=[],
+        folder_documents=("~/project/AGENTS.md", "~/standards/own.md"),
+        folder_resolved={
+            "~/project/AGENTS.md": str(agents_md.resolve()),
+            "~/standards/own.md": str(own.resolve()),
+        },
+        provider_type=provider_type,
+        native_steering=native_steering,
+        project=str(project),
+        agent="custom",
+        is_member=False,
+    )
+    assert {row["name"]: row["switch"] for row in rows} == {
+        "AGENTS.md": plan.SWITCH_UNAVAILABLE,
+        "own.md": plan.SWITCH_UNAVAILABLE,
+    }
+
+
+def test_a_folder_file_stays_switchable_where_crew_is_the_only_sender(home, tmp_path):
+    own = _write(tmp_path / "standards" / "own.md", "# Own\n")
+    rows = plan.chat_steering_plan(
+        listed=[],
+        folder_documents=("~/standards/own.md",),
+        folder_resolved={"~/standards/own.md": str(own.resolve())},
+        provider_type="codex",
+        native_steering=False,
+        project=None,
+        agent=None,
+        is_member=False,
+    )
+    assert [r["switch"] for r in rows] == [plan.SWITCH_ON]
+
+
+def test_a_listed_file_the_folder_carries_in_a_cold_kiro_cli_chat_is_not_switchable(
+    home, tmp_path, monkeypatch
+):
+    """With no launch record the folder carries a tree file kiro-cli loads as well."""
+    from kiro_crew import context as ctx
+
+    monkeypatch.setattr(ctx.acp_driver, "inherits_default_resources", lambda _p: True)
+    listed = list_steering_blocking(None)["files"]
+    path = next(e["path"] for e in listed if e["name"] == "always.md")
+    rows = plan.chat_steering_plan(
+        listed=listed,
+        folder_documents=(path,),
+        provider_type=PROVIDER_ACP,
+        native_steering=False,
+        project=None,
+        agent="kirocrew",
+        is_member=False,
+    )
+    row = next(r for r in rows if r["name"] == "always.md")
+    assert (row["reaches"], row["switch"]) == (plan.REACHES_YES, plan.SWITCH_UNAVAILABLE)
+
+
+def test_a_switch_off_kept_from_before_a_harness_change_can_be_switched_back_on(
+    home, tmp_path, monkeypatch
+):
+    """The turn still drops a stored switch-off on kiro-cli, so the row says off, not unavailable."""
+    from kiro_crew import context as ctx
+
+    monkeypatch.setattr(ctx.acp_driver, "inherits_default_resources", lambda _p: False)
+    own = _write(tmp_path / "standards" / "own.md", "# Own\n")
+    other = _write(tmp_path / "standards" / "other.md", "# Other\n")
+    rows = plan.chat_steering_plan(
+        listed=[],
+        folder_documents=("~/standards/own.md", "~/standards/other.md"),
+        folder_resolved={
+            "~/standards/own.md": str(own.resolve()),
+            "~/standards/other.md": str(other.resolve()),
+        },
+        provider_type=PROVIDER_ACP,
+        native_steering=False,
+        project=None,
+        agent="custom",
+        is_member=False,
+        steering_off=frozenset({str(own.resolve())}),
+    )
+    by_name = {r["name"]: (r["reaches"], r["reason"], r["switch"]) for r in rows}
+    assert by_name["own.md"] == (plan.REACHES_NO, plan.REASON_SWITCHED_OFF, plan.SWITCH_OFF)
+    assert by_name["other.md"][2] == plan.SWITCH_UNAVAILABLE
