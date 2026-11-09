@@ -173,7 +173,15 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
     )
     from kiro_crew.security.argv_floor_self import (  # noqa: F401
         _DEV_MODE_CONFIRM_FLAG,
+        _GIT_GLOBAL_EXIT_OPTIONS,
+        _GIT_GLOBAL_VALUE_OPTIONS,
+        _GIT_GREP_OPEN_RIVALS,
+        _GIT_GREP_PAGER_CONFIG_KEYS,
+        _GIT_GREP_VALUE_LONG,
+        _GIT_GREP_VALUE_SHORT,
+        _GIT_PAGER_ENV_WORDS,
         _RAW_ASSIGNMENT_RE,
+        _RAW_COMMAND_ENDS,
         _SELF_CLOUD_DESTRUCTIVE_VERBS,
         _SELF_FLOOR_MACHINERY_RE,
         _SELF_FLOOR_NAME_HINT_RE,
@@ -181,6 +189,8 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _SELF_IMPORT_RE,
         _SELF_MODULE_SPELLINGS,
         _bare_kill_raw_bodies,
+        _git_grep_pager_commands,
+        _grep_arg_pager,
         _is_credential_mint,
         _is_dev_mode_out_of_root_confirm,
         _is_kill_by_name_program,
@@ -195,6 +205,8 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _kill_prefix_keeps_anchor,
         _matches_self_subcommand,
         _operands_lead_with,
+        _raw_commands,
+        _scan_grep_args,
         _self_cli_operands,
         _self_floor_can_fire,
         _self_module_flag_scan,
@@ -252,6 +264,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
     )
 if TYPE_CHECKING:  # names it serves from outside its owners, from their homes
     from kiro_crew.atomic_write import on_event_loop as _event_loop_running  # noqa: F401
+    from kiro_crew.security import argv_rules as _argv_rules  # noqa: F401
     from kiro_crew.security import shell_normalizer as _shell_normalizer  # noqa: F401
     from kiro_crew.security.denied_rules import (  # noqa: F401
         _GIT_PUBLISH_UNGATED,
@@ -276,6 +289,7 @@ if TYPE_CHECKING:  # names it serves from outside its owners, from their homes
     )
     from kiro_crew.security.shell_normalizer import (  # noqa: F401
         _AMBIGUOUS_EXPANSION_RE,
+        _ARRAY_EXPAND_RE,
         _PROCESS_SUBSTITUTION_OPENERS,
         _PYTHON_INLINE_PROGRAM_FLAGS,
         _PYTHON_OPERAND_FLAGS,
@@ -283,6 +297,7 @@ if TYPE_CHECKING:  # names it serves from outside its owners, from their homes
         _REDIRECT_START_RE,
         _SHELL_WRAPPER_CHARS,
         _argv_programs,
+        _array_assignments,
         _backtick_closer,
         _cut_at_operator,
         _data_consumer_exempt,

@@ -746,7 +746,12 @@ def _url_payload_command(n: int) -> str:
 #: (``/owa/?ItemID=<id>&exvsurl=1&...``) in ``redaction_entropy``, its use by
 #: the exfil gate and its five names in the ``redaction`` facade manifest, so
 #: Graph's own message and event links are not masked or blocked. Re-measured.
-_PACKAGE_LINE_BUDGET = 35_227
+#: Raised by 259, from 35,227, for the self-kill floor's ``git grep`` pager read in
+#: ``argv_floor_self`` (``-O`` / ``--open-files-in-pager``, ``-c core.pager`` /
+#: ``pager.grep``, ``GIT_PAGER`` / ``PAGER``, array elements), parsed as git parses
+#: the invocation, from the command as submitted, and the facade's type-checker
+#: imports of its names. Re-measured.
+_PACKAGE_LINE_BUDGET = 35_486
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
