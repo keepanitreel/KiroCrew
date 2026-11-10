@@ -121,6 +121,10 @@ export type {
   IssueLinkedChange,
   IssueReactions,
   IssueSource,
+  IssueQuery,
+  IssueQueryResponse,
+  IssueSummary,
+  IssuePerson,
   AppContributor,
   PullRequestSource,
 } from './index.sources'
