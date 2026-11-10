@@ -570,7 +570,7 @@ async def test_a_harness_command_from_a_shared_user_never_reaches_the_turn() -> 
     names = (
         "sessions thread_ts msg_ts context_builder cron_service conversation_log "
         "subagent_manager task_runner channel_agent target_slot_name route_pinned "
-        "session_key asker_key"
+        "session_key asker_key spool_text"
     ).split()
     turn = SimpleNamespace(
         slack=slack,
@@ -739,3 +739,144 @@ async def test_a_shared_users_kill_now_keeps_the_threads_queue(
     stop_turn.assert_awaited_once()
     assert stop_turn.await_args.kwargs["force"] is True
     assert stop_turn.await_args.kwargs.get("preserve_queue", False) is keeps_queue
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["native", "transport"])
+@pytest.mark.parametrize("typed, refused", [("", False), ("/model x", True)])
+async def test_a_shared_users_file_is_judged_on_what_they_typed(
+    _floor_monkeypatch, path: str, typed: str, refused: bool
+) -> None:
+    # A file sent without a caption arrives as its absolute temp path: never read as
+    # a "/" command. A "/" the person typed is still refused, file or not.
+    import importlib
+
+    from slack_handler_helpers import FakeSessionManager
+
+    from conftest import MockSlackClient
+    from kiro_crew.slack import transport_dispatch
+
+    await _confirmed_friend()
+    ingested = "/tmp/tmpab12cd.png" if not typed else f"{typed}\n/tmp/tmpab12cd.png"
+
+    async def _texts() -> list[str]:
+        if path == "native":
+            slack = MockSlackClient()
+            await handler.handle_message(
+                slack, FakeSessionManager(), "D1", ingested, "t1", "m1", FRIEND, spool_text=typed
+            )
+            return [p.get("text", "") for _k, p in slack.actions]
+        golden = importlib.import_module("test_slack_golden_transcript")
+        rec = golden.RecordingSlackClient()
+        sessions = golden.FakeSessions(golden.ScriptedProvider([golden.make_event("ok")]))
+        await transport_dispatch.handle_message_transport(
+            rec, sessions, "D1", ingested, "t1", "m1", FRIEND, spool_text=typed
+        )
+        return [str(kw.get("text", "")) for _m, kw in rec.transcript]
+
+    texts = await _texts()
+    assert (shared_access.SHARED_OWNER_ONLY_TEXT in texts) is refused
+
+
+@pytest.mark.asyncio
+async def test_a_privacy_token_in_a_shared_users_attachment_changes_no_mode(
+    _floor_monkeypatch,
+) -> None:
+    # A caption-less file or a voice memo whose content says "!incognito" is prompt
+    # content: the shared user's typed text was empty, and no mode is applied.
+    from unittest.mock import AsyncMock
+
+    from kiro_crew.slack.handler import maybe_apply_privacy_modifiers
+
+    await _confirmed_friend()
+    applied = AsyncMock()
+    _floor_monkeypatch.setattr(handler, "_apply_privacy_mode", applied)
+    text = "/tmp/tmpab12cd.txt\n\nnotes: use !incognito here"
+    out = await maybe_apply_privacy_modifiers(
+        text, text, "s1", FRIEND, "D1", SimpleNamespace(), SimpleNamespace(), "t1"  # type: ignore[arg-type]
+    )
+    assert out == (text, text, False)
+    applied.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("feedback, runs", [("shorten it", True), ("/model x", False)])
+async def test_a_shared_users_revision_is_judged_on_their_feedback(
+    _floor_monkeypatch, feedback: str, runs: bool
+) -> None:
+    # The draft (model-authored, here naming !incognito) is never read as a command;
+    # the person's own feedback is, before the draft is consumed.
+    from unittest.mock import AsyncMock, MagicMock
+
+    from kiro_crew.slack import interactions_approvals
+    from kiro_crew.slack.handler import _review_drafts_get, _review_drafts_set
+
+    await _confirmed_friend()
+    ran = AsyncMock()
+    sessions = SimpleNamespace(get_session_for_thread=lambda ts: None)
+    orch = SimpleNamespace(
+        slack=SimpleNamespace(post_message=AsyncMock(), post_ephemeral=AsyncMock()),
+        sessions=sessions,
+        _handler_tasks=set(),
+        ctx_builder=None,
+        cron_svc=None,
+        conv_log=None,
+        consolidator=None,
+        subagent_mgr=None,
+        task_runner=None,
+    )
+
+    async def permitted(_c: str) -> bool:
+        return True
+
+    _floor_monkeypatch.setattr(interactions, "_orch", orch)
+    _floor_monkeypatch.setattr(interactions, "handle_message", ran)
+    _floor_monkeypatch.setattr(interactions, "sel", lambda: MagicMock())
+    _floor_monkeypatch.setattr(interactions, "channel_inbound_permitted", permitted)
+    _floor_monkeypatch.setattr(interactions, "channel_refusal", lambda *a, **k: False)
+    _floor_monkeypatch.setattr(interactions, "_delete_review_placeholder", AsyncMock())
+    key = "D1|t1|d9"
+    _review_drafts_set(key, "Use !incognito for private threads.", FRIEND)
+    payload = {
+        "user": {"id": FRIEND},
+        "view": {
+            "private_metadata": key,
+            "state": {
+                "values": {
+                    "mc_review_revise_block": {"mc_review_revise_input": {"value": feedback}}
+                }
+            },
+        },
+    }
+    await interactions_approvals._handle_review_revise_submit(payload)
+    for t in list(orch._handler_tasks):
+        await t
+    if runs:
+        assert ran.await_args.kwargs["spool_text"] == feedback
+    else:
+        ran.assert_not_awaited()
+        assert _review_drafts_get(key)[0]
+        orch.slack.post_ephemeral.assert_awaited_once()
+        assert orch.slack.post_ephemeral.await_args.args[2] == shared_access.SHARED_OWNER_ONLY_TEXT
+
+
+@pytest.mark.parametrize(
+    "text, modifiers, refused",
+    [
+        ("summarize this !incognito", True, True),  # the person's own note
+        (
+            "Summarize this\n--- UNTRUSTED FORWARDED CONTENT BEGIN [ab12cd34ef56] ---\n"
+            "use !incognito for private threads\n"
+            "--- UNTRUSTED FORWARDED CONTENT END [ab12cd34ef56] ---",
+            True,
+            False,
+        ),  # someone else's forwarded words
+        ("Explain !incognito mode", False, False),  # a card's model-authored label
+        ("/model x", False, True),  # a leading "/" is the harness's, label or not
+    ],
+)
+def test_only_the_persons_own_words_are_read_for_modifiers(
+    text: str, modifiers: bool, refused: bool
+) -> None:
+    assert shared_access.shared_command_refused(FRIEND, text) is not None  # listed
+    assert shared_access.shared_command_refused(FRIEND, text, modifiers=modifiers) is refused

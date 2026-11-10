@@ -21,6 +21,7 @@ switch-off applies to the next event. A confirmation is kept for
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -220,7 +221,14 @@ _SHARED_ACTION_PREFIXES = (
 )
 
 
-def shared_command_refused(user_id: str, text: str) -> bool:
+_FORWARDED_BODY = re.compile(
+    r"--- UNTRUSTED FORWARDED CONTENT BEGIN \[(\w+)\] ---.*?"
+    r"--- UNTRUSTED FORWARDED CONTENT END \[\1\] ---",
+    re.DOTALL,
+)
+
+
+def shared_command_refused(user_id: str, text: str, *, modifiers: bool = True) -> bool:
     """Whether *text* from a shared user is a command they may not send.
 
     A leading ``/`` (after any bot mention) reaches the agent harness's own command
@@ -228,6 +236,10 @@ def shared_command_refused(user_id: str, text: str) -> bool:
     ``/tools trust-all``), and a ``!temporary`` / ``!incognito`` modifier keeps the
     owner's own record from holding the turn. Both are the owner's. False for the
     owner and for anyone who is not a shared user.
+
+    The modifier scan reads only the person's own words: a forwarded message's
+    fenced body is someone else's, and with *modifiers* False (a card's
+    model-authored label) only the leading ``/`` is judged.
     """
     # circular import: slack.handler composes the access module that imports this one.
     from kiro_crew.messaging import privacy_mode
@@ -238,7 +250,9 @@ def shared_command_refused(user_id: str, text: str) -> bool:
     stripped = text.lstrip()
     if stripped.startswith("<@") and ">" in stripped:
         stripped = stripped[stripped.index(">") + 1 :].lstrip()
-    return stripped.startswith("/") or bool(privacy_mode.strip_tokens(text)[1])
+    if stripped.startswith("/"):
+        return True
+    return modifiers and bool(privacy_mode.strip_tokens(_FORWARDED_BODY.sub("", text))[1])
 
 
 def shared_action_permitted(action_id: str) -> bool:
