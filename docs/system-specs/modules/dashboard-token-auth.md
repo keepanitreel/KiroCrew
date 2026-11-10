@@ -350,10 +350,14 @@ def try_consume(token: str) -> bool: ...
 def revoke_all_sessions() -> None: ...
     # Clears all nonces, IP bindings, and consumed tokens AND bumps the
     # persisted revocation-generation counter, so every outstanding cookie
-    # (for all users) is rejected. Used by `kirocrew logout`. The counter is
-    # authoritative over BOTH cookie types: validate_token() AND
-    # validate_refresh_token() reject a token whose embedded gen is stale, so
-    # the bump ends established access cookies and refresh chains alike.
+    # (for all users) is rejected. The counter is authoritative over BOTH
+    # cookie types: validate_token() AND validate_refresh_token() reject a
+    # token whose embedded gen is stale, so the bump ends established access
+    # cookies and refresh chains alike.
+
+async def revoke_all_sessions_async() -> None: ...
+    # The same revocation for the event loop; `kirocrew logout` (POST
+    # /api/logout) awaits it. Only the counter write runs on a worker thread.
 
 def revoke_access_cookie(token: str) -> bool: ...
     # Per-session revocation (CWE-613). Validates the token, then adds ITS nonce
@@ -616,6 +620,23 @@ validators fail closed until the state is repaired. The gateway warning names
 the exact file and advises deleting only that file to reset revocation state;
 the warning also states the security consequence: resetting the counter can
 re-enable unexpired sessions previously revoked by `kirocrew logout`.
+
+A `kirocrew logout` never makes token validation wait for the disk.
+`POST /api/logout` awaits `revoke_all_sessions_async()`, and only
+`persist_next_revocation_gen()` (the base read, the temp-file write and the
+rename) runs on a worker thread, under `_bump_lock`, never under the `_gen_lock`
+every validation takes (`test_validation_reads_the_counter_while_a_bump_write_is_stuck`).
+Back on the loop, with no await between, `publish_revocation_gen()` makes the
+new value live (never lowering it) and the link, pin and consumed state is
+cleared, so no loop handler sees a half-done logout and every pre-logout pin
+still holds while the write is in flight
+(`test_a_pin_stays_in_force_while_the_logout_write_is_stuck`,
+`test_only_the_logout_write_leaves_the_event_loop`). A failed write still
+clears that state and raises, as `revoke_all_sessions()` does, with the live value
+unchanged (`test_a_failed_logout_write_raises_and_leaves_the_generation`). Each write builds
+on the larger of the live value and the file, so a logout that overlaps another
+never writes the value the first one has written but not yet published
+(`test_a_bump_builds_on_a_value_persisted_but_not_yet_published`).
 
 #### App-token scope confinement (CWE-269)
 
