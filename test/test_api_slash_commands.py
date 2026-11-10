@@ -158,8 +158,33 @@ class TestApiSlashCommands:
         assert len(payload) == len(by_name)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("backend", ["", "kiro", "kas"])
+    @pytest.mark.parametrize("backend", ["", "kiro", "kas", "codex"])
     async def test_non_member_backends_keep_the_kiro_cli_menu(self, backend):
         """Only a backend that runs its own commands gets the claude list."""
         names = {item["name"] for item in await _get("acp", backend)}
         assert not names & {"/init", "/review", "/security-review"}
+
+    @pytest.mark.asyncio
+    async def test_codex_lists_only_the_commands_that_work_there(self):
+        """codex-acp runs /compact and /mcp from a prompt and sends every other
+        kiro-cli word to the model, so the menu offers those two, /clear and the
+        commands the dashboard answers itself."""
+        payload = await _get("acp", "codex")
+        by_name = {item["name"]: item["description"] for item in payload}
+
+        assert {"/compact", "/clear", "/mcp"} <= set(by_name)
+        assert {"/agent", "/goal", "/prompts", "/side", "/workflow"} <= set(by_name)
+        assert not set(by_name) & {
+            "/tools",
+            "/hooks",
+            "/code",
+            "/experiment",
+            "/logdump",
+            "/changelog",
+            "/help",
+            "/context",
+            "/usage",
+            "/model",
+        }
+        for name, desc in by_name.items():
+            assert desc == SLASH_COMMAND_DESCRIPTIONS[name], name

@@ -48,6 +48,7 @@ from kiro_crew.acp.client import advertised_model_ids, model_is_unusable
 from kiro_crew.acp_backends import (  # noqa: F401 - selectable_backend_values is a facade name
     ACP_BACKEND_CLAUDE,
     ACP_BACKEND_KIRO,
+    ACP_BACKEND_PROMPT_HANDLER_COMMANDS,
     ACP_BACKENDS_LOCAL_HARNESS_COMMANDS,
     ACP_BACKENDS_MODEL_AT_LAUNCH,
     model_registry_namespace,
@@ -1592,6 +1593,11 @@ async def api_slash_commands(request: web.Request) -> web.Response:
     # (local_harness_menu, which /help prints too).
     if cfg.agent.acp_backend in ACP_BACKENDS_LOCAL_HARNESS_COMMANDS:
         offered = offered & local_harness_menu(cfg.agent.acp_backend)
+    # A harness whose prompt handler runs only some harness commands gets the
+    # notice for the rest too, so list what the dashboard serves and that row.
+    runs_from_prompt = ACP_BACKEND_PROMPT_HANDLER_COMMANDS.get(cfg.agent.acp_backend)
+    if runs_from_prompt is not None:
+        offered = offered & (local_harness_menu(cfg.agent.acp_backend) | runs_from_prompt)
     return web.json_response(
         [{"name": c, "description": SLASH_COMMAND_DESCRIPTIONS.get(c, "")} for c in sorted(offered)]
         + await asyncio.to_thread(user_quick_prompt_menu)  # expanded on every harness

@@ -271,7 +271,16 @@ commands the dashboard serves there (`/agent`, `/clear`, `/compact`, `/goal`,
 `/mcp`, `/model`, `/tools` and `/usage` on KAS alone;
 `kas_local_commands.local_harness_menu`), because the slash
 gate reads the same set and answers every other harness command with a notice
-naming the harness. On KAS, `/model`, `/tools`, `/mcp`, `/context`, `/usage`,
+naming the harness. A harness with a row in `ACP_BACKEND_PROMPT_HANDLER_COMMANDS`
+gets the same rule, except for the harness commands in its row. Those reach the
+harness as typed. Codex has the one row, `/compact` and `/mcp`, because codex-acp's
+`classifyPrompt` runs only those of Crew's harness commands and sends any other name
+to the model. On Codex the list is `/agent`, `/clear`, `/compact`, `/goal`, `/mcp`,
+`/prompts`, `/side` and `/workflow`. A `/help`, `/context`, `/tools` or other
+kiro-cli word typed on Codex gets the "doesn't work with OpenAI Codex. It was not
+sent to the agent." notice. Codex's own built-ins (`/status`, `/review` and the
+others) are not Crew harness commands, so they are not listed and stay prompt text.
+On KAS, `/model`, `/tools`, `/mcp`, `/context`, `/usage`,
 `/help` and `/agent` (bare or `list`) are answered by
 `dashboard/kas_local_commands.py` from state
 the dashboard already holds, never by the model and without a turn: `/model`
