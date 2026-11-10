@@ -23,7 +23,6 @@ from aiohttp import web
 
 from kiro_crew.apps.backend import get_app_backend_port
 from kiro_crew.apps.manager import (
-    apps_dir,
     get_app_manifest,
     is_app_enabled,
     resolve_mcp_backend_url,
@@ -83,8 +82,10 @@ def _get_app_secret(name: str) -> str:
     cached = _app_secret_cache.get(name)
     if cached:
         return cached
-    path = apps_dir() / name / ".app_secret"
-    secret = path.read_text().strip() if path.is_file() else ""
+    # circular import: token_auth -> app_secret_store -> manager -> routes
+    from kiro_crew.dashboard.token_auth import read_app_secret
+
+    secret = read_app_secret(name)
     if secret:
         _app_secret_cache[name] = secret
     return secret

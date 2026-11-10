@@ -308,13 +308,10 @@ class TestGatewayOriginInjection:
         install_app(src)
         return name
 
-    def _write_secret(self, name, *, mode=0o600, secret=None):
-        from kiro_crew.apps.manager import app_dir
+    def _write_secret(self, name, *, secret=None):
+        from kiro_crew.dashboard.token_auth import write_app_secret
 
-        path = app_dir(name) / ".app_secret"
-        path.write_text(secret if secret is not None else self._SECRET)
-        os.chmod(path, mode)
-        return path
+        write_app_secret(name, secret if secret is not None else self._SECRET)
 
     def _capture_child_env(self, monkeypatch, app_name):
         """Freeze the spawn at the Popen boundary and return the child env dict.
@@ -565,11 +562,11 @@ class TestGatewayOriginInjection:
     def test_missing_secret_still_injects_origin_but_no_secret(
         self, tmp_path, app_env, monkeypatch
     ):
-        """A missing .app_secret is tolerated: origin still set, no proof, no secret."""
-        from kiro_crew.apps.manager import app_dir
+        """A missing secret is tolerated: origin still set, no proof, no secret."""
+        from kiro_crew.apps import protected_app_state
 
         name = self._install_backend_app(tmp_path)
-        (app_dir(name) / ".app_secret").unlink()  # install writes one; remove it
+        protected_app_state.secret_path(name).unlink()  # install writes one; remove it
         monkeypatch.setenv("KIROCREW_BOUND_PORT", "8123")
 
         _result, env = self._capture_child_env(monkeypatch, name)
