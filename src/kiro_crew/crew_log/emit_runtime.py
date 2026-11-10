@@ -1572,8 +1572,9 @@ def on_session_closed(
     the fire-and-forget behaviour.
     """
 
-    def _forget() -> None:
+    def _forget(*, release: bool = False) -> None:
         tracker = _tracker_instance
+        _dropped: "Any" = None
         with _lock:
             # Only when no turn of this session is still running. A forced reset
             # tears a session down MID-TURN, and that turn goes on writing through
@@ -1585,9 +1586,9 @@ def on_session_closed(
             # capacity rule reclaims it once that turn is gone. With no tracker
             # installed, no turn of this process is live.
             if tracker is not None:
-                tracker.pop_unless_live(_open, session_id)
+                _dropped = tracker.pop_unless_live(_open, session_id)
             else:
-                _open.pop(session_id, None)
+                _dropped = _open.pop(session_id, None)
             # A later session reusing this id must write its own configuration
             # rather than inheriting a closed session's as "unchanged".
             _last_config.pop(session_id, None)
@@ -1600,6 +1601,20 @@ def on_session_closed(
             # closing entry itself was dropped -- which is the case for exactly
             # the sessions the flag is set on.
             _creation_failed.discard(session_id)
+        # Release the write lease only on the LANDED path (after= on the writer
+        # thread). The writer's per-unit FIFO guarantee proves that every earlier
+        # append for this session landed or was dropped before this callback runs,
+        # so no append is mid-write when the lease is freed.
+        #
+        # On the REJECTED path (_settle_rejected, release=False) an earlier append
+        # may still be stalled inside the write lock after reading the tail; freeing
+        # the lease there would let remove_unit unlink the segment, and the stalled
+        # _append_line would then recreate the directory and write a headerless log.
+        # Keeping release=False on that path preserves main's behaviour: the handle
+        # stays held in _open until the GC cycle collects it, remove_unit keeps
+        # returning REMOVE_OWNED, and the write completes normally.
+        if release and _dropped is not None:
+            _dropped.release_ownership()
         # The writer's overflow tally is per SESSION and is only ever read while that
         # session is writing, so it dies with the session. Left behind, a gateway that
         # runs for weeks keeps one entry per session that ever overflowed; and a
@@ -1624,7 +1639,7 @@ def on_session_closed(
         "session/closed",
         {"reason": reason},
         src=_SRC_GATEWAY,
-        after=_forget,
+        after=lambda: _forget(release=True),
         on_settled=on_settled,
     )
 
