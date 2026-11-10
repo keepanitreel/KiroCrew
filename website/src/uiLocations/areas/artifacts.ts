@@ -6,12 +6,13 @@ import { PREVIEW_ARTIFACT_DEPLOY } from '../../utils/previewFlags'
 import type { UiLocationArea } from '../types'
 
 export const LOCATIONS = {
-  // The labelled half of the header's split button. Its children are a
-  // spinner-or-icon expression plus the label, so the key is named.
+  // The quick-create row's Doc tile (desktop). Its children are an icon tile
+  // plus the label, so the key is named. A phone draws a split button instead,
+  // which is not registered.
   'artifacts.new': {
     kind: 'button',
-    label: { from: 'text', key: 'pages.artifactsPage.new_artifact' },
-    aliasKeys: ['pages.artifactsPage.start_a_new_blank_document_in_the_library'],
+    label: { from: 'text', key: 'pages.artifactsPage.quick_doc' },
+    aliasKeys: ['pages.artifactsPage.start_a_new_blank_document_in_the_library', 'pages.artifactsPage.new_artifact'],
     terms: {
       en: ['new document', 'create a document', 'blank document', 'new doc', 'create an artifact', 'write a document'],
       'zh-CN': ['新建文档', '创建文档', '空白文档', '新文档', '创建产物'],
@@ -24,21 +25,17 @@ export const LOCATIONS = {
       it: ['nuovo documento', 'creare un documento'],
       ru: ['новый документ', 'создать документ'],
     },
-    placements: [{ surface: 'artifacts', parent: 'page.artifacts', entry: 'toolbar' }],
-  },
-  // The split button's caret. Its accessible name depends on the viewport: on
-  // a phone the same menu also holds New folder and reads "More actions". Only
-  // the desktop name is registered, so the phone placement is not indexed.
-  'artifacts.add-menu': {
-    kind: 'button',
-    label: { from: 'attr', attr: 'aria-label', key: 'pages.artifactsPage.more_ways_to_add_an_artifact' },
     placements: [{
       surface: 'artifacts', parent: 'page.artifacts', entry: 'toolbar',
       requires: [{ kind: 'viewport', value: 'desktop' }],
     }],
   },
+  // The quick-create row's Import tile (desktop). On a phone importing lives
+  // in the split button's "More actions" menu, which is not registered.
   'artifacts.import': {
-    kind: 'menu-item',
+    kind: 'button',
+    label: { from: 'text', key: 'pages.artifactsPage.quick_import' },
+    aliasKeys: ['pages.artifactsPage.import_from_a_file'],
     terms: {
       en: ['upload a file', 'import a file', 'upload', 'add a file', 'upload a document', 'import a document'],
       'zh-CN': ['上传文件', '导入文件', '上传', '上传文档', '导入文档'],
@@ -51,7 +48,10 @@ export const LOCATIONS = {
       it: ['caricare un file', 'importare un file'],
       ru: ['загрузить файл', 'импортировать файл'],
     },
-    placements: [{ surface: 'artifacts', parent: 'artifacts.add-menu', entry: 'menu' }],
+    placements: [{
+      surface: 'artifacts', parent: 'page.artifacts', entry: 'toolbar',
+      requires: [{ kind: 'viewport', value: 'desktop' }],
+    }],
   },
   // The Starred half of the Starred/All filter. One element, placed in the
   // toolbar on a desktop and beside the view switcher on a phone.
@@ -64,11 +64,12 @@ export const LOCATIONS = {
     },
     placements: [{ surface: 'artifacts', parent: 'page.artifacts', entry: 'toolbar' }],
   },
-  // The desktop toolbar's New folder. On a phone it moves into the add menu,
-  // whose phone name ("More actions") is not registered, so that copy is not
-  // indexed.
+  // The quick-create row's Folder tile (desktop). On a phone it moves into the
+  // add menu, whose phone name ("More actions") is not registered, so that
+  // copy is not indexed.
   'artifacts.new-folder': {
     kind: 'button',
+    label: { from: 'text', key: 'pages.artifactsPage.quick_folder' },
     aliasKeys: ['pages.artifactsPage.create_a_folder_to_organize_your_artifacts'],
     terms: {
       en: ['make an artifact folder', 'create an artifact folder', 'new artifact folder', 'organize my artifacts', 'organize my documents'],
@@ -81,7 +82,7 @@ export const LOCATIONS = {
   },
   // The desktop toolbar's link to the Artifact Deploy console, behind its
   // preview flag. On a phone it moves into the add menu, whose phone name is
-  // not registered (see artifacts.add-menu), so that copy is not indexed.
+  // not registered, so that copy is not indexed.
   'artifacts.deploy': {
     kind: 'button',
     label: { from: 'text', key: 'pages.artifactsPage.artifact_deploy' },

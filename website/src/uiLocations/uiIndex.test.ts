@@ -1530,8 +1530,8 @@ describe('the committed index', () => {
     expect(at('schedule.add-job').placements[0]).toMatchObject({ route: '/schedule', parent_ids: ['page.schedule'], requires: [{ kind: 'condition', id: 'has_schedules' }] })
     expect(en[at('schedule.add-job').label_key]).toBe('Add Job')
     expect(zh[at('schedule.add-job').label_key]).toBe('添加任务')
-    // Artifacts: import hangs under the desktop caret menu.
-    expect(at('artifacts.import').placements[0]).toMatchObject({ route: '/artifacts', parent_ids: ['page.artifacts', 'artifacts.add-menu'], entry_kind: 'menu' })
+    // Artifacts: import is a desktop quick-create tile beside Doc and Folder.
+    expect(at('artifacts.import').placements[0]).toMatchObject({ route: '/artifacts', parent_ids: ['page.artifacts'], entry_kind: 'toolbar' })
     // MCP: Connections opens on Services, so the MCP Servers sub-tab is in the path.
     for (const id of ['mcp.add-custom', 'mcp.add-server']) {
       expect(at(id).placements[0]).toMatchObject({

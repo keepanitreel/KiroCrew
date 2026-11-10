@@ -13,7 +13,7 @@
  *     here: it measures its parent, and that parent hugs this control's width.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
+import { screen, waitFor, cleanup, fireEvent, within } from '@testing-library/react'
 import ArtifactsPage from '../pages/ArtifactsPage'
 import { renderWithProviders } from './helpers'
 import { api } from '../api/client'
@@ -71,11 +71,13 @@ describe('ArtifactsPage header row at phone width', () => {
     await waitFor(() => expect(screen.getByRole('menuitem', { name: /new folder/i })).toBeTruthy())
   })
 
-  it('keeps the add-specific trigger name on desktop, where the menu only adds', async () => {
+  it('gives a desktop quick-create tiles instead of the split button', async () => {
     mobile = false
     renderWithProviders(<ArtifactsPage />)
-    await waitFor(() => expect(headerRow()).toBeTruthy())
-    expect(screen.getByRole('button', { name: /more ways to add an artifact/i })).toBeTruthy()
+    const tiles = await waitFor(() => screen.getByRole('group', { name: /create new/i }))
+    for (const name of ['Doc', 'Import', 'Folder']) {
+      expect(within(tiles).getByRole('button', { name })).toBeTruthy()
+    }
     expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull()
   })
 

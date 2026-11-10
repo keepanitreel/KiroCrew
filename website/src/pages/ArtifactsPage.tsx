@@ -48,6 +48,9 @@ import {
 import { type GridEntry, VIRTUALIZE_AT, LibraryMasonry } from './ArtifactsPageGallery'
 import { SessionDocsGallery, RemoteBrowseSection } from './ArtifactsPageSections'
 import { useArtifactsPageCreate } from './useArtifactsPageCreate'
+import { ArtifactsSideNav, type LibrarySelection } from './ArtifactsPageSideNav'
+import { ArtifactsHome, ArtifactCardGrid } from './ArtifactsPageHome'
+import { ArtifactsQuickCreate } from './ArtifactsPageQuickCreate'
 
 export { VIRTUALIZE_AT } from './ArtifactsPageGallery'
 
@@ -182,6 +185,27 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
   // than showing a phantom empty view.
   const scopeFolderId = folders.some(f => f.id === currentFolderId) ? currentFolderId : ''
 
+  // ── Side list (desktop) ──────────────────────────────────────
+  // Home, All artifacts or one folder, carried by the URL like the folder
+  // scope: `?folder=<id>`, `?scope=all`, or neither for Home. A phone keeps the
+  // folder cards and has no Home, so none of this applies there.
+  const sideNav = !isMobile
+  const selection: LibrarySelection = scopeFolderId
+    ? { kind: 'folder', id: scopeFolderId }
+    : searchParams.get('scope') === 'all' ? { kind: 'all' } : { kind: 'home' }
+  const selectNav = useCallback((sel: LibrarySelection) => {
+    setSearchParams(
+      sel.kind === 'folder' ? { folder: sel.id } : sel.kind === 'all' ? { scope: 'all' } : {},
+      { replace: false },
+    )
+  }, [setSearchParams])
+  // "All artifacts" lists every artifact flat, across folders, like a filter.
+  const flatAll = sideNav && selection.kind === 'all'
+  // The Starred toggle is not offered on Home, so a persisted Starred choice
+  // must not take Home over either.
+  const isHome = sideNav && selection.kind === 'home'
+    && !(filter || tagFilter || kindFilter || chatScopeActive)
+
   // Tree expansion for the table view — client-local by design (§2.5):
   // collapsed by default, expanded ids persisted per browser.
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => {
@@ -271,14 +295,18 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
     setCreatingFolder(false)
     // In the gallery, create inside the folder being browsed; the tree view
     // creates at root (nest afterwards via drag or the folder menu).
-    const parent = view === 'grid' && !filtersActive ? scopeFolderId : ''
+    // With the side list, a new folder goes inside the selected folder in
+    // either view.
+    const parent = sideNav
+      ? scopeFolderId
+      : view === 'grid' && !filtersActive ? scopeFolderId : ''
     createFolderMut.mutate({
       name,
       ...(parent ? { parent_id: parent } : {}),
       ...(newFolderColor ? { color: newFolderColor } : {}),
     })
     scheduleIconRefetch()
-  }, [createFolderMut, view, filtersActive, scopeFolderId, newFolderColor, scheduleIconRefetch])
+  }, [createFolderMut, sideNav, view, filtersActive, scopeFolderId, newFolderColor, scheduleIconRefetch])
   const {
     addFileInputRef,
     addError,
@@ -290,7 +318,7 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
     handleAddArtifactFile,
     newArtifactMut,
     handleNewArtifact,
-  } = useArtifactsPageCreate({ qc, navigate, invalidateFolders, view, filtersActive, scopeFolderId })
+  } = useArtifactsPageCreate({ qc, navigate, invalidateFolders, view, filtersActive, scopeFolderId, sideNav })
 
   const folderActions = useMemo<FolderActions>(() => ({
     onOpen: openFolder,
@@ -343,7 +371,7 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
     }
   }, [deletingFolder, folders, scopeFolderId, openFolder, invalidateFolders])
 
-  const { data, isLoading, error, refetch } = useQuery<{ artifacts: Artifact[] }>({
+  const { data, isLoading, error, refetch } = useQuery<{ artifacts: Artifact[]; output_cap?: number }>({
     queryKey: ['artifacts', { tag: tagFilter, kind: kindFilter, touchedBy: touchedByScope, chatFolder: chatFolderScope }],
     queryFn: () =>
       api.artifacts({
@@ -358,7 +386,7 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
   // can switch between tags without first resetting to "all tags". Without
   // this, allTags would be derived only from currently-filtered results and
   // co-occurring tags would disappear when one is selected.
-  const allTagsQ = useQuery<{ artifacts: Artifact[] }>({
+  const allTagsQ = useQuery<{ artifacts: Artifact[]; output_cap?: number }>({
     queryKey: ['artifacts', 'all-tags'],
     queryFn: () => api.artifacts({}),
   })
@@ -582,19 +610,33 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
   // folder (a dangling folder_id degrades to unfiled). Any filter active →
   // flat matches across all folders (§2.6). The tree table buckets for itself.
   const scopedVisible = useMemo(() => {
-    if (filtersActive) return visible
+    if (filtersActive || flatAll) return visible
     const ids = new Set(folders.map(f => f.id))
     return visible.filter(a => {
       const fid = a.folder_id && ids.has(a.folder_id) ? a.folder_id : ''
       return fid === scopeFolderId
     })
-  }, [visible, filtersActive, folders, scopeFolderId])
+  }, [visible, filtersActive, flatAll, folders, scopeFolderId])
+  // The table's rows for one selected folder in the side list: that folder's
+  // own artifacts, column-sorted, rather than the whole tree.
+  const sortedScoped = useMemo(() => sortArtifacts(scopedVisible, sort), [scopedVisible, sort])
+  const tableShowsFolder = sideNav && !!scopeFolderId && !filtersActive
 
-  // Subfolder cards shown above the gallery masonry (browse mode only).
+  // Subfolder cards shown above the gallery masonry (browse mode only). The
+  // side list already shows the top level, so with it only a folder's own
+  // subfolders get cards.
   const subfolders = useMemo(
-    () => (filtersActive ? [] : childFolders(folders, scopeFolderId)),
-    [filtersActive, folders, scopeFolderId],
+    () => (filtersActive || flatAll || (sideNav && !scopeFolderId) ? [] : childFolders(folders, scopeFolderId)),
+    [filtersActive, flatAll, sideNav, folders, scopeFolderId],
   )
+  // Artifacts filed directly in each folder, for the side list's counts.
+  const folderCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const a of allTagsData?.artifacts || []) {
+      if (a.folder_id) m.set(a.folder_id, (m.get(a.folder_id) ?? 0) + 1)
+    }
+    return m
+  }, [allTagsData])
 
   // Up to three preview artifacts per subfolder card — direct children first,
   // then deeper descendants, so every folder card gives a visual glimpse of
@@ -644,7 +686,8 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
   const sessionDocsQ = useQuery<{ docs: SessionDoc[] }>({
     queryKey: ['artifact-session-docs'],
     queryFn: () => api.artifactSessionDocs(),
-    enabled: !pinnedOnly && !chatScopeActive,
+    // Home lists these in its output row whatever the Starred choice is.
+    enabled: (isHome || !pinnedOnly) && !chatScopeActive,
     staleTime: 30_000,
   })
   // A suffixed slug means the canonical one still serves the older artifact, so without
@@ -772,7 +815,8 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
   // in normal page flow rather than shrinking them into a height-locked column.
   // Use provider capability, not asynchronously loaded rows, so pending, empty,
   // filtered, and failed remote reads all keep the same scroll ownership.
-  const galleryOwnsScroll = view === 'grid' && gridEntries.length >= VIRTUALIZE_AT && cols > 1
+  // A desktop draws the card grid in page flow, never the virtualized masonry.
+  const galleryOwnsScroll = !sideNav && view === 'grid' && gridEntries.length >= VIRTUALIZE_AT && cols > 1
     && discoveryProviders.length === 0
   // Hide-on-scroll for the page's own chrome. At 390x844 the title, subtitle,
   // heading row and filter rows pin 317px — 38% of the viewport — above a 527px
@@ -833,6 +877,38 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
   // `isLoading` early return, because hooks cannot run after it.
   return (
     <>
+      {/* One DndContext spans the side list, breadcrumb, folder cards and
+          gallery/table so artifacts and folders can be dragged between all
+          of them. It renders no DOM of its own. */}
+      <DndContext
+        sensors={dndSensors}
+        collisionDetection={artifactLibraryCollision}
+        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+      <DndActiveProbe report={reportDndActive} />
+      <div className="flex-1 min-h-0 flex">
+      {sideNav && (
+        <ArtifactsSideNav
+          selection={selection}
+          onSelect={selectNav}
+          folders={folders}
+          actions={folderActions}
+          expandedIds={expandedIds}
+          onToggleExpand={toggleExpanded}
+          totalCount={allTagsData?.artifacts?.length ?? artifacts.length}
+          counts={folderCounts}
+          creatingFolder={creatingFolder}
+          newFolderColor={newFolderColor}
+          onPickNewFolderColor={setNewFolderColor}
+          onCommitNewFolder={commitNewFolder}
+          onCancelNewFolder={() => setCreatingFolder(false)}
+          onNewFolder={handleNewFolder}
+        />
+      )}
       {/* The scroll host carries NO padding of its own: `PageHeader` brings the
         * page gutter with it, and doubling that would put the title 32px in
         * while the cards it labels stay at 16px. The gutter lives on the inner
@@ -845,7 +921,7 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
       <div
         ref={chromeHostRef}
         data-testid="artifacts-scroll-host"
-        className={`flex-1 min-h-0 flex flex-col ${
+        className={`flex-1 min-w-0 min-h-0 flex flex-col ${
           galleryOwnsScroll ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
       >
@@ -940,30 +1016,38 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
           * title is the flex item that gives, and at 320px it is squeezed to a
           * few pixels while the view switcher still hangs off the right edge. */}
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-text-strong">{i18nT('pages.artifactsPage.your_artifacts')}</h3>
+          <h3 className="text-sm font-semibold text-text-strong">
+            {!sideNav
+              ? i18nT('pages.artifactsPage.your_artifacts')
+              : selection.kind === 'folder'
+                ? (folders.find(f => f.id === selection.id)?.name ?? '')
+                : selection.kind === 'all'
+                  ? i18nT('pages.artifactsPage.all_artifacts')
+                  : i18nT('pages.artifactsPage.home')}
+          </h3>
           <div className="flex items-center gap-2">
-            {/* Split button: creating a blank document is the common verb and
-              * gets the zero-click path; importing a file keeps its muscle
-              * memory one click away under the caret. */}
+            {/* Phone: a split button. Creating a blank document is the common
+              * verb and gets the zero-click path; importing a file keeps its
+              * muscle memory one click away under the caret. A desktop gets
+              * the quick-create tiles below the toolbar instead, which carry
+              * the registered UI locations. */}
+            {isMobile && (
             <div className="flex items-center">
               <Btn
                 onClick={handleNewArtifact}
                 disabled={newArtifactMut.isPending}
                 className="flex items-center gap-1.5 rounded-r-none"
                 title={i18nT('pages.artifactsPage.start_a_new_blank_document_in_the_library')}
-                {...uiLocation('artifacts.new')}
               >
                 {newArtifactMut.isPending ? <Loader2 size={13} className="animate-spin" /> : <FilePlus size={13} />} {i18nT('pages.artifactsPage.new_artifact')}
               </Btn>
-              <DropdownMenu guideScope="menu:artifacts.add-menu">
+              <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Btn
                     // On a phone this menu also holds the folder action, so an
                     // add-only name would under-promise its contents — and the
                     // name is all a screen reader gets from a chevron.
-                    aria-label={isMobile
-                      ? i18nT('pages.artifactsPage.more_actions')
-                      : i18nT('pages.artifactsPage.more_ways_to_add_an_artifact')}
+                    aria-label={i18nT('pages.artifactsPage.more_actions')}
                     disabled={addArtifactMut.isPending}
                     // The caret holds only a 13px icon, so its content box is
                     // ~7px shorter than the labelled half next to it (whose
@@ -974,13 +1058,12 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                     // pinning a literal height that the label's font would
                     // outgrow.
                     className="rounded-l-none border-l-0 px-1 self-stretch"
-                    {...uiLocation('artifacts.add-menu')}
                   >
                     {addArtifactMut.isPending ? <Loader2 size={13} className="animate-spin" /> : <ChevronDown size={13} />}
                   </Btn>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={handleAddArtifact} {...uiLocation('artifacts.import')}>
+                  <DropdownMenuItem onSelect={handleAddArtifact}>
                     <FileText size={13} className="text-muted shrink-0" /> {i18nT('pages.artifactsPage.import_from_a_file')}
                   </DropdownMenuItem>
                   {/* On a phone this menu is also where the folder action lives:
@@ -1013,6 +1096,7 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+            )}
             <Input
               ref={addFileInputRef}
               type="file"
@@ -1021,11 +1105,6 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
               className="hidden"
               onChange={handleAddArtifactFile}
             />
-            {!isMobile && (
-              <Btn onClick={handleNewFolder} className="flex items-center gap-1.5" title={i18nT('pages.artifactsPage.create_a_folder_to_organize_your_artifacts')} {...uiLocation('artifacts.new-folder')}>
-                <FolderPlus size={13} /> {i18nT('pages.artifactsPage.new_folder')}
-              </Btn>
-            )}
             {/* On a phone the view switcher moves down to pair with the Starred
               * toggle: both answer "what am I looking at", and putting them on
               * one justified row gives the toolbar's last line a left AND a
@@ -1092,23 +1171,45 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                   {viewSwitcher}
                 </div>
               )
-              : starredToggle}
+              // Home already separates kept from not kept, so it offers no
+              // Starred filter.
+              : !isHome && starredToggle}
           </div>
           <ArtifactScopeChips touchedBy={touchedByScope} chatFolder={chatFolderScope} onClear={clearChatScope} askAgent={handoffSafe} />
+          {sideNav && (
+            <ArtifactsQuickCreate
+              onNewDoc={handleNewArtifact}
+              newDocBusy={newArtifactMut.isPending}
+              onImport={handleAddArtifact}
+              importBusy={addArtifactMut.isPending}
+              onNewFolder={handleNewFolder}
+            />
+          )}
         </CollapsibleChrome>
 
-          {/* One DndContext spans breadcrumb + folder cards + gallery/table so
-              artifacts and folders can be dragged between all of them. */}
-          <DndContext
-            sensors={dndSensors}
-            collisionDetection={artifactLibraryCollision}
-            measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-            onDragCancel={handleDragCancel}
-          >
-            <DndActiveProbe report={reportDndActive} />
+            {/* Folder rename announcement — always mounted so the live region is present for any view. */}
+            <span className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="folder-rename-status">{folderRenameAnnouncement}</span>
+            {/* A failed read with nothing cached falls through to the truthful
+              * placeholder below: Home's "nothing yet" lines would claim an
+              * empty library the page never read. */}
+            {isHome && !(errMessage && artifacts.length === 0) ? (
+              <ArtifactsHome
+                artifacts={allTagsData?.artifacts ?? artifacts}
+                sessionDocs={sessionDocs}
+                outputCap={allTagsData?.output_cap ?? data?.output_cap}
+                folders={folders}
+                view={view}
+                onSeeAll={() => selectNav({ kind: 'all' })}
+                handlers={{
+                  onOpen: handleOpen,
+                  onTogglePin: handleTogglePin,
+                  pinningSlug,
+                  onMaterialize: handleMaterialize,
+                  materializingPath,
+                  onPreviewDoc: handlePreviewDoc,
+                }}
+              />
+            ) : (<>
             {/* Everything between the chrome and the gallery is capped and
               * scrolls itself once the gallery owns the page's scroll axis.
               *
@@ -1133,11 +1234,10 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
             {view === 'grid' && !filtersActive && scopeFolderId && (
               <FolderBreadcrumbBar folders={folders} currentFolderId={scopeFolderId} onNavigate={openFolder} />
             )}
-            {/* Folder rename announcement — always mounted so the live region is present for any view. */}
-            <span className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="folder-rename-status">{folderRenameAnnouncement}</span>
-            {view === 'grid' && (subfolders.length > 0 || (creatingFolder && !filtersActive)) && (
+            {/* With the side list, a new folder is named there instead. */}
+            {view === 'grid' && (subfolders.length > 0 || (creatingFolder && !filtersActive && !sideNav)) && (
               <FolderCardGrid>
-                {creatingFolder && !filtersActive && (
+                {creatingFolder && !filtersActive && !sideNav && (
                   <div className="mb-3 rounded-lg border border-accent bg-card p-3" style={newFolderColor ? { borderLeft: `3px solid ${newFolderColor}` } : undefined}>
                     <div className="h-[84px] rounded-md border border-dashed border-border flex items-center justify-center text-muted mb-2.5">
                       <FolderPlus size={22} className="opacity-50" />
@@ -1168,7 +1268,7 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                 ))}
               </FolderCardGrid>
             )}
-            {(view !== 'grid' || filtersActive) && creatingFolder && (
+            {(view !== 'grid' || filtersActive) && creatingFolder && !sideNav && (
               <div className="mb-2 max-w-[360px]">
                 <div className="flex items-center gap-2">
                   <FolderPlus size={15} className="shrink-0" style={{ color: newFolderColor || 'var(--accent)' }} />
@@ -1241,6 +1341,22 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                       : i18nT('pages.artifactsPage.no_unfiled_artifacts_everything_is_filed_in_fold')}
                 </div>
               )
+            ) : view === 'grid' && sideNav ? (
+              // Desktop: the same equal-height cards as Home, not the masonry.
+              <ArtifactCardGrid
+                artifacts={scopedVisible}
+                folders={folders}
+                onDelete={handleDelete}
+                deletingSlug={deleteMut.isPending ? (deleteMut.variables as string) : null}
+                h={{
+                  onOpen: handleOpen,
+                  onTogglePin: handleTogglePin,
+                  pinningSlug,
+                  onMaterialize: handleMaterialize,
+                  materializingPath,
+                  onPreviewDoc: handlePreviewDoc,
+                }}
+              />
             ) : view === 'grid' ? (
               <LibraryMasonry
                 entries={gridEntries}
@@ -1254,9 +1370,9 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                 onTogglePin={handleTogglePin}
                 pinningSlug={pinningSlug}
               />
-            ) : filtersActive ? (
+            ) : filtersActive || tableShowsFolder ? (
               <LibraryTable
-                items={sortedVisible}
+                items={tableShowsFolder ? sortedScoped : sortedVisible}
                 sort={sort}
                 onSort={handleSort}
                 onOpen={handleOpen}
@@ -1264,7 +1380,8 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                 deletingSlug={deleteMut.isPending ? (deleteMut.variables as string) : null}
                 onTogglePin={handleTogglePin}
                 pinningSlug={pinningSlug}
-                sessionDocs={hideSessionDocs ? [] : sessionDocs}
+                // Session documents are never filed, so a folder lists none.
+                sessionDocs={hideSessionDocs || tableShowsFolder ? [] : sessionDocs}
                 onMaterialize={pinnedOnly ? undefined : handleMaterialize}
                 onPreviewDoc={handlePreviewDoc}
                 materializingPath={materializingPath}
@@ -1291,6 +1408,7 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                 materializingPath={materializingPath}
               />
             )}
+            </>)}
 
             <DragOverlay dropAnimation={null} modifiers={[snapOverlayToCursor]}>
               {activeDrag && (
@@ -1309,7 +1427,6 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
                 </div>
               )}
             </DragOverlay>
-          </DndContext>
 
           <ArtifactFolderDeleteDialog
             folder={deletingFolder}
@@ -1341,6 +1458,8 @@ export default function ArtifactsPage() {  const navigate = useNavigate()
         ))}
         </div>
       </div>
+      </div>
+      </DndContext>
 
       {/* Drag-move confirmation + undo. Deliberately a SIBLING of the scroll
           host (exactly as ChatSidebar renders it below the session lanes), so

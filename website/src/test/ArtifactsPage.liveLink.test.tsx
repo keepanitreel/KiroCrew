@@ -9,6 +9,9 @@ import { PREVIEW_ARTIFACT_DEPLOY } from '../utils/previewFlags'
 import type { Artifact } from '../types'
 
 vi.mock('../api/client')
+// The library browse layout this suite pins (root gallery, folder cards) ships
+// on a phone; a desktop opens on Home with the side list instead.
+vi.mock('../hooks/useIsMobile', () => ({ useIsMobile: () => true }))
 
 /**
  * A static artifact published to the public web keeps its link in the AWS

@@ -438,7 +438,7 @@ def _path_or_description(placement: dict[str, Any]) -> list[str]:
 @pytest.mark.parametrize(
     ("query", "target"),
     [
-        # The path explains "artifact": Artifacts > ... > Import from a file.
+        # "artifact" plus "import": the Artifacts page's Import tile.
         ("import an artifact", "artifacts.import"),
         ("where do I import artifacts", "artifacts.import"),
         # "everything" and "everywhere" are one word: the Search everywhere alias.
@@ -454,7 +454,8 @@ def test_path_words_and_all_words_complete_a_real_match(query: str, target: str)
 def test_a_path_completed_match_never_outranks_a_direct_one() -> None:
     d = ui_index.find_ui("chat model", "en")
     assert all(r["match"] != "tokens_with_path" for r in d["results"]), d["results"]
-    assert _top(ui_index.find_ui("import an artifact", "en"))["match"] == "tokens_with_path"
+    # The control: a query only the path completes still matches through it.
+    assert _top(ui_index.find_ui("schedule job", "en"))["match"] == "tokens_with_path"
 
 
 @pytest.mark.parametrize(

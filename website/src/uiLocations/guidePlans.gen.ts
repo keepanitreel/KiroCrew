@@ -3,7 +3,7 @@
 import type { UiGuidePlan } from './types'
 
 /** The `build_digest` of the packaged index this bundle was built with (see `guideBuildDigest`). */
-export const GUIDE_BUILD_DIGEST = "sha256:667e9c20184933fec08c55a712ebe25b68d1d0021bdf34e4eb91ecb072117c9e"
+export const GUIDE_BUILD_DIGEST = "sha256:ed14fa473d0ad1a90a9ac02c706869d0e387e364fb98f38a1ba77b1f22f5a684"
 
 /** Curated location ids: the only ids a live observation may name. */
 export const GUIDE_OBSERVABLE_IDS: readonly string[] = [
@@ -27,7 +27,6 @@ export const GUIDE_OBSERVABLE_IDS: readonly string[] = [
   "apps.refresh-store",
   "apps.sources",
   "apps.sources.add-registry",
-  "artifacts.add-menu",
   "artifacts.deploy",
   "artifacts.detail.comments",
   "artifacts.detail.more",
@@ -210,10 +209,6 @@ export const GUIDE_REVEAL_SCOPES = {
   "menu:apps.sources": {
     "kind": "menu",
     "revealer": "apps.sources"
-  },
-  "menu:artifacts.add-menu": {
-    "kind": "menu",
-    "revealer": "artifacts.add-menu"
   },
   "menu:artifacts.detail.more": {
     "kind": "menu",
@@ -574,24 +569,6 @@ export const GUIDE_PLANS: Readonly<Record<string, UiGuidePlan>> = {
       }
     ]
   },
-  "artifacts.add-menu": {
-    "version": 2,
-    "label_key": "pages.artifactsPage.more_ways_to_add_an_artifact",
-    "placements": [
-      {
-        "id": "desktop",
-        "route": "/artifacts",
-        "viewport": "desktop",
-        "steps": [
-          {
-            "id": "desktop:artifacts.add-menu",
-            "location": "artifacts.add-menu",
-            "label_key": "pages.artifactsPage.more_ways_to_add_an_artifact"
-          }
-        ]
-      }
-    ]
-  },
   "artifacts.detail.comments": {
     "version": 2,
     "label_key": "pages.artifactDetailPage.show_comments",
@@ -700,7 +677,7 @@ export const GUIDE_PLANS: Readonly<Record<string, UiGuidePlan>> = {
   },
   "artifacts.import": {
     "version": 2,
-    "label_key": "pages.artifactsPage.import_from_a_file",
+    "label_key": "pages.artifactsPage.quick_import",
     "placements": [
       {
         "id": "desktop",
@@ -708,15 +685,9 @@ export const GUIDE_PLANS: Readonly<Record<string, UiGuidePlan>> = {
         "viewport": "desktop",
         "steps": [
           {
-            "id": "desktop:artifacts.add-menu",
-            "location": "artifacts.add-menu",
-            "label_key": "pages.artifactsPage.more_ways_to_add_an_artifact",
-            "scope": "menu:artifacts.add-menu"
-          },
-          {
             "id": "desktop:artifacts.import",
             "location": "artifacts.import",
-            "label_key": "pages.artifactsPage.import_from_a_file"
+            "label_key": "pages.artifactsPage.quick_import"
           }
         ]
       }
@@ -724,16 +695,17 @@ export const GUIDE_PLANS: Readonly<Record<string, UiGuidePlan>> = {
   },
   "artifacts.new": {
     "version": 2,
-    "label_key": "pages.artifactsPage.new_artifact",
+    "label_key": "pages.artifactsPage.quick_doc",
     "placements": [
       {
-        "id": "any",
+        "id": "desktop",
         "route": "/artifacts",
+        "viewport": "desktop",
         "steps": [
           {
-            "id": "any:artifacts.new",
+            "id": "desktop:artifacts.new",
             "location": "artifacts.new",
-            "label_key": "pages.artifactsPage.new_artifact"
+            "label_key": "pages.artifactsPage.quick_doc"
           }
         ]
       }
@@ -741,7 +713,7 @@ export const GUIDE_PLANS: Readonly<Record<string, UiGuidePlan>> = {
   },
   "artifacts.new-folder": {
     "version": 2,
-    "label_key": "pages.artifactsPage.new_folder",
+    "label_key": "pages.artifactsPage.quick_folder",
     "placements": [
       {
         "id": "desktop",
@@ -751,7 +723,7 @@ export const GUIDE_PLANS: Readonly<Record<string, UiGuidePlan>> = {
           {
             "id": "desktop:artifacts.new-folder",
             "location": "artifacts.new-folder",
-            "label_key": "pages.artifactsPage.new_folder"
+            "label_key": "pages.artifactsPage.quick_folder"
           }
         ]
       }

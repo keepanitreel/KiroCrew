@@ -69,7 +69,7 @@ const EXPECTED: Record<string, Expect> = {
     placement: { surface: 'artifacts', route: '/artifacts', parents: ['page.artifacts'], entry: 'toolbar', requires: [] },
   },
   'artifacts.new-folder': {
-    kind: 'button', labelKey: 'pages.artifactsPage.new_folder',
+    kind: 'button', labelKey: 'pages.artifactsPage.quick_folder',
     aliasKeys: ['pages.artifactsPage.create_a_folder_to_organize_your_artifacts'], source: ARTIFACTS_SRC,
     placement: { surface: 'artifacts', route: '/artifacts', parents: ['page.artifacts'], entry: 'toolbar', requires: [{ kind: 'viewport', value: 'desktop' }] },
   },
@@ -143,7 +143,8 @@ describe('schedule, artifacts and capabilities wave-3 locations', () => {
   it('keeps the wave-2 entries of these areas unchanged', () => {
     expect(byId.get('schedule.create-first')!.placements[0].requires).toEqual(cond('no_schedules'))
     expect(byId.get('schedule.add-job')!.placements[0].requires).toEqual(cond('has_schedules'))
-    expect(byId.get('artifacts.import')!.placements[0].parent_ids).toEqual(['page.artifacts', 'artifacts.add-menu'])
+    // Import is a quick-create tile on the desktop toolbar row, no longer a menu entry.
+    expect(byId.get('artifacts.import')!.placements[0].parent_ids).toEqual(['page.artifacts'])
     expect(byId.get('mcp.add-custom')!.placements[0].parent_ids).toEqual(['page.capabilities', 'tab.capabilities.mcp', 'connections.mcp-servers-tab'])
   })
 })

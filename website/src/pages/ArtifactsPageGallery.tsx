@@ -12,12 +12,11 @@ import type { ItemContent } from '@virtuoso.dev/masonry'
 // virtualizer rather than a library: see `LibraryList` for the measured reason.
 import { useVirtualChat } from '../hooks/virtualizer/useVirtualChat'
 import { api } from '../api/client'
-import { Badge } from '../components/ui'
 import { publicationBadgeLabel, usePublicationProviderName } from '../lib/publicationBadge'
 import { timeAgo as _timeAgo } from '../utils/timeAgo'
 import { DndDraggable } from '../components/dnd'
 import type { Artifact } from '../types'
-import { KIND_BADGE, isoToTs } from '../components/library/LibraryTable'
+import { KindPill, isoToTs } from '../components/library/LibraryTable'
 import type { LibraryDrag } from '../components/library/LibraryTable'
 import { WidgetThumb, ContentThumb, ImageThumb, WebAppThumb } from '../components/library/ArtifactThumbs'
 import { LiveSiteLink } from '../components/library/LiveSiteLink'
@@ -157,7 +156,7 @@ function LocalCardBody({ a, context }: { a: Artifact; context: LibCtx }) {
               </span>
             )}
           </div>
-          <Badge variant={KIND_BADGE[a.kind]}>{a.kind}</Badge>
+          <KindPill kind={a.kind} />
         </div>
         {a.description && <div className="text-[12px] text-muted mt-1 line-clamp-2">{a.description}</div>}
         {a.tags && a.tags.length > 0 && (
