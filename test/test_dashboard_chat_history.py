@@ -730,6 +730,45 @@ class TestCronTranscriptResume:
         assert state.get_slot("cron-job1") is tab
 
 
+class TestTaskReviewTranscriptResume:
+    @pytest.mark.asyncio
+    async def test_a_resumed_review_transcript_saves_to_its_own_transcript(
+        self, tmp_path, monkeypatch
+    ):
+        """A task-runner review chat reopened from History keeps saving to its own transcript.
+
+        Unbound, the tab reads ``taskrunner_t1_chat_abc.jsonl`` but saves every new
+        turn to a second ``dashboard:taskrunner_t1_chat_abc`` file, which the delete
+        witness refuses, so the turns are never kept.
+        """
+        from kiro_crew.dashboard.chat import _save_slot_to_history
+
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        log = state.conversation_log
+        log.append("taskrunner:t1:chat:abc", "user", "review prompt")
+        log.append("taskrunner:t1:chat:abc", "assistant", "review answer")
+        line = {"linked_session_key": "taskrunner:t1:chat:abc"}
+        await asyncio.to_thread(log.update_metadata, "taskrunner:t1:chat:abc", line)
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(
+                "/api/chat/slots/taskrunner_t1_chat_abc/resume",
+                json={"key": "taskrunner_t1_chat_abc"},
+            )
+            assert resp.status == 200, await resp.text()
+
+        slot = state.get_slot("taskrunner_t1_chat_abc")
+        assert slot.linked_session_key == "taskrunner:t1:chat:abc"
+        slot.append("user", "follow-up after resume")
+        slot.drain()
+        assert _save_slot_to_history(state, slot) is True, "the resumed tab's save was refused"
+        assert (
+            log.read_messages("taskrunner:t1:chat:abc")[-1]["content"] == "follow-up after resume"
+        )
+        assert log.read_messages("dashboard:taskrunner_t1_chat_abc") == []
+
+
 # ── History key prefix handling ──
 
 
