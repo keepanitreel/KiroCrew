@@ -18,7 +18,6 @@ import hashlib
 import logging
 import os
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -1141,15 +1140,29 @@ def _forced_demuxer_args(audio_path: str) -> tuple[str, ...]:
     return ("-f", demuxer)
 
 
+def _ffmpeg_in(directory: str) -> str | None:
+    """The ffmpeg executable directly inside *directory*, or ``None``.
+
+    The name is joined by hand rather than looked up with
+    ``shutil.which("ffmpeg", path=directory)``: on Windows ``which`` searches the
+    current working directory before *path*, so an ``ffmpeg.exe`` in the
+    gateway's working directory would win over the fixed one.
+    """
+    name = "ffmpeg.exe" if platform_compat.IS_WINDOWS else "ffmpeg"
+    candidate = os.path.join(directory, name)
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return None
+
+
 def _find_system_ffmpeg() -> str | None:
     """Return a system FFmpeg from fixed directories rather than ambient PATH."""
     trusted_path = platform_compat.trusted_system_path()
-    if trusted_path:
-        found = shutil.which("ffmpeg", path=trusted_path)
-        if found:
-            return found
-    for directory in _FFMPEG_CANDIDATE_DIRS:
-        found = shutil.which("ffmpeg", path=directory)
+    directories = trusted_path.split(os.pathsep) if trusted_path else []
+    for directory in [*directories, *_FFMPEG_CANDIDATE_DIRS]:
+        if not directory:
+            continue
+        found = _ffmpeg_in(directory)
         if found:
             return found
     return None

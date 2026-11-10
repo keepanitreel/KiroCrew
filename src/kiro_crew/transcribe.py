@@ -1262,6 +1262,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _close_abandoned_ffmpeg_resolution,
         _decoder_exit_detail,
         _ffmpeg_candidate_dirs,
+        _ffmpeg_in,
         _ffmpeg_payload_chunks,
         _ffmpeg_snapshot_cleanup_lock,
         _ffmpeg_snapshot_root,

@@ -10,6 +10,7 @@ the service unit and is writable from inside the sandbox.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 from unittest.mock import patch
 
@@ -17,7 +18,7 @@ import pytest
 from voice_reply_helpers import _no_argv_prefixers  # noqa: F401
 from voice_reply_helpers import _capture_mkstemp, _mock_subprocess
 
-from kiro_crew import transcribe, transcribe_ffmpeg
+from kiro_crew import transcribe
 from kiro_crew.voice_reply import stitch_mp3s
 
 _TRUSTED_FFMPEG = os.path.join(os.sep, "usr", "bin", "ffmpeg")
@@ -102,11 +103,48 @@ async def test_stitch_ignores_an_ffmpeg_only_on_path(tmp_path) -> None:
     with pytest.MonkeyPatch.context() as mp:
         allocated = _capture_mkstemp(mp)
         mp.setenv("PATH", _plant_on_path(tmp_path))
-        mp.setattr(transcribe_ffmpeg.platform_compat, "trusted_system_path", lambda: str(empty))
-        mp.setattr(transcribe_ffmpeg, "_FFMPEG_CANDIDATE_DIRS", [str(empty)])
+        mp.setattr(transcribe.platform_compat, "trusted_system_path", lambda: str(empty))
+        mp.setattr(transcribe, "_FFMPEG_CANDIDATE_DIRS", [str(empty)])
         with patch("asyncio.create_subprocess_exec", side_effect=fake_exec) as spawn:
             result = await stitch_mp3s(_two_inputs(tmp_path))
 
     assert result is None
     spawn.assert_not_called()
     assert not os.path.exists(allocated[0])
+
+
+def test_the_trusted_lookup_never_asks_which(tmp_path) -> None:
+    """``shutil.which(name, path=dir)`` searches the working directory first on
+    Windows, so the trusted lookup joins each fixed directory by hand."""
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    binary = trusted / ("ffmpeg.exe" if transcribe.platform_compat.IS_WINDOWS else "ffmpeg")
+    binary.write_bytes(b"not a real ffmpeg")
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+
+    def _no_which(*_a, **_kw):
+        raise AssertionError("the trusted ffmpeg lookup called shutil.which")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(shutil, "which", _no_which)
+        mp.setattr(transcribe.platform_compat, "trusted_system_path", lambda: None)
+        mp.setattr(transcribe, "_FFMPEG_CANDIDATE_DIRS", [str(trusted)])
+        assert transcribe._find_system_ffmpeg() == str(binary)
+
+
+@pytest.mark.skipif(
+    not transcribe.platform_compat.IS_WINDOWS,
+    reason="Windows-only: only Windows searches the working directory for a program.",
+)
+def test_an_ffmpeg_in_the_working_directory_is_not_chosen(tmp_path) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "ffmpeg.exe").write_bytes(b"MZ")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.chdir(work)
+        mp.setattr(transcribe.platform_compat, "trusted_system_path", lambda: None)
+        mp.setattr(transcribe, "_FFMPEG_CANDIDATE_DIRS", [str(empty)])
+        assert transcribe._find_system_ffmpeg() is None
