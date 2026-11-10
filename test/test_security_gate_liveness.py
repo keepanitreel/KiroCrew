@@ -746,7 +746,17 @@ def _url_payload_command(n: int) -> str:
 #: (``/owa/?ItemID=<id>&exvsurl=1&...``) in ``redaction_entropy``, its use by
 #: the exfil gate and its five names in the ``redaction`` facade manifest, so
 #: Graph's own message and event links are not masked or blocked. Re-measured.
-_PACKAGE_LINE_BUDGET = 35_227
+#: Raised by 53, from 35,227, for the ssh floor's self-host read of a glob verb:
+#: a verb glob with a directory part always keeps host matching, a bare glob only
+#: in execute position (``_executed_program_indices`` over
+#: ``argv_rules._split_commands_indexed``), so a bare glob that only sits in a
+#: program's operands, a comment or a ``case`` arm is a filename, not a self-host.
+#: Re-measured.
+#: Raised by 34, from 35,280, for ``_array_element_indices`` (reusing
+#: ``_array_literals`` beside ``_array_assignments``) and the ssh floor reading it,
+#: so a bare glob inside an array literal (``files=( s* *.* )``) is an element, not
+#: an executed verb. Re-measured.
+_PACKAGE_LINE_BUDGET = 35_314
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
