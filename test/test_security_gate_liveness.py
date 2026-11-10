@@ -746,7 +746,9 @@ def _url_payload_command(n: int) -> str:
 #: (``/owa/?ItemID=<id>&exvsurl=1&...``) in ``redaction_entropy``, its use by
 #: the exfil gate and its five names in the ``redaction`` facade manifest, so
 #: Graph's own message and event links are not masked or blocked. Re-measured.
-_PACKAGE_LINE_BUDGET = 35_227
+#: Raised by 28, from 35,227, for ``shell_commands.pipelines`` and the rm floor reading
+#: each pipeline whole in ``_command_tokens``. It only adds refusals. Re-measured.
+_PACKAGE_LINE_BUDGET = 35_255
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
