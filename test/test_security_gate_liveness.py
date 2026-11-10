@@ -746,7 +746,11 @@ def _url_payload_command(n: int) -> str:
 #: (``/owa/?ItemID=<id>&exvsurl=1&...``) in ``redaction_entropy``, its use by
 #: the exfil gate and its five names in the ``redaction`` facade manifest, so
 #: Graph's own message and event links are not masked or blocked. Re-measured.
-_PACKAGE_LINE_BUDGET = 35_227
+#: Raised by 53, from 35,227, for ``argv_floor_ssh``: a glob program word is walked
+#: once per ssh-family verb it can name (``_ssh_family_verbs``, ``_frame_verb_choices``),
+#: and ``_shares_nested_verdicts`` judges each nested payload once per outer call so
+#: those walks do not multiply. Nothing is relaxed. Re-measured.
+_PACKAGE_LINE_BUDGET = 35_280
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
