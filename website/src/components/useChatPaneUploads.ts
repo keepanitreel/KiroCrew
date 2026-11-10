@@ -2,6 +2,7 @@ import { useState, useCallback, type Dispatch, type MutableRefObject, type SetSt
 import { useMutation } from '@tanstack/react-query'
 import { useChatFileDrop } from './ChatDropOverlay'
 import { appendSlotMessage } from '../store/chatSlice'
+import { LOCAL_ERROR_META } from '../store/chat/transcript'
 import { api } from '../api/client'
 import { classifyDrop } from '../utils/dropClassify'
 import { spliceDirTokens, servedUploadMb, VIDEO_EXT } from '../utils/fileTokens'
@@ -73,7 +74,7 @@ export function useChatPaneUploads({ slotKey, dispatch, slotKeyRef, mountedRef, 
    *  than held in component state nobody may ever render. Never dropped. */
   const reportUploadFailure = useCallback((message: string, forSlot: string) => {
     if (mountedRef.current && forSlot === slotKeyRef.current) { setUploadError(message, forSlot); return }
-    dispatch(appendSlotMessage({ slot: forSlot, message: { role: 'error', content: message, cls: '' } }))
+    dispatch(appendSlotMessage({ slot: forSlot, message: { role: 'error', content: message, cls: '', meta: { [LOCAL_ERROR_META]: true } } }))
   }, [dispatch, setUploadError, mountedRef, slotKeyRef])
 
   // File upload as a mutation (isPending replaces a manual `uploading` flag).

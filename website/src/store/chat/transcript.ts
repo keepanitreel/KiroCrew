@@ -29,6 +29,11 @@ import { secureRandomId } from '../../utils/secureId'
  *  renderers and the mergePreservedClientTs rehydration path. */
 export const mintMsgId = (): string => `msg-${secureRandomId()}`
 
+/** `meta` key on an `error` row this browser wrote with no server copy (an
+ *  attachment failure reported to a chat off screen). A history page cannot
+ *  carry it, so a slot switch keeps it rather than replacing it away. */
+export const LOCAL_ERROR_META = 'localError'
+
 /** Stamp a stable `meta.clientTs` on a message that has no server `ts` and no
  *  pre-existing client id. This makes every ts-less message carry a durable
  *  identity from birth, surviving Immer structural sharing, refetch/rehydration,

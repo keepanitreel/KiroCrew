@@ -17,7 +17,7 @@ import { recentErrors, recordError, redactSecrets, type ErrorReport } from '../.
 import { chatSlotDetailPath } from '../../api/chatSlotPaths'
 import type { ChatState } from './state'
 import { fetchSlotDetail, isUnsafeKey, safeKey } from './wire'
-import { deduplicateByMid, finalizePageStreaming, floorForGen, olderHeadAbovePage, pageRegressesSupersededSteer, preserveSettledMcpOauth, preserveSettledStopState, preserveSettledUpsertRows, queueAfterSupersededDrain, raiseChunkSeq, sameTranscript, serverRowCount, snapshotChunkGen, snapshotChunkSeq, tailNotInPage } from './transcript'
+import { deduplicateByMid, finalizePageStreaming, LOCAL_ERROR_META, floorForGen, olderHeadAbovePage, pageRegressesSupersededSteer, preserveSettledMcpOauth, preserveSettledStopState, preserveSettledUpsertRows, queueAfterSupersededDrain, raiseChunkSeq, sameTranscript, serverRowCount, snapshotChunkGen, snapshotChunkSeq, tailNotInPage } from './transcript'
 import { abortActiveOlderFetch, pagingCursorAfterKeptHead, slotCoverageShortfall, slotSwitchFetchLimit } from './paging'
 import { mergePreservedThinking, reinsertThinkingOrphans, type ThinkingAnchor } from './thinking'
 import { keepPendingCoordinatorApprovals } from './coordinatorApprovals'
@@ -680,6 +680,11 @@ export function addSlotSwitchCases(builder: ActionReducerMapBuilder<ChatState>):
       // partial finalized first reads as a reply, passes the streaming filter
       // above beside the newer local reply, and the reply renders twice.
       if (endedTurnHistory) next = finalizePageStreaming(next, preserved)
+      // Error rows written only in this browser (an attachment that failed
+      // while its chat was off screen) are on no server page, so the page
+      // would drop the one report that chat has. Carry them to the tail.
+      const localErrors = existing.filter(m => m.role === 'error' && m.meta?.[LOCAL_ERROR_META] === true && !next.includes(m))
+      if (localErrors.length) next = [...next, ...localErrors]
       /* switchSlot fetches a BOUNDED page (OLDER_PAGE_LIMIT), and `pending`
        * restored this slot's cached transcript into `state.messages`, so
        * assigning the page wholesale collapsed a window the reader had paged in
