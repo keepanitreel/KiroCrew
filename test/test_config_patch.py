@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1840,10 +1841,15 @@ class TestUpdateNudgeKeys:
 
     @pytest.mark.asyncio
     async def test_full_record_round_trips_atomically(self, tmp_config) -> None:
+        # Stored with the gateway's own clock beside it, which the unattended-apply
+        # hold counts from (update_deferral.user_deferred_update).
+        before = time.time()
         async with TestClient(TestServer(_make_app())) as c:
             assert (await _patch(c, "dashboard.update_nudge", self._REC)).status == 200
-        data = json.loads(tmp_config.read_text(encoding="utf-8"))
-        assert data["dashboard"]["update_nudge"] == self._REC
+        after = time.time()
+        stored = json.loads(tmp_config.read_text(encoding="utf-8"))["dashboard"]["update_nudge"]
+        assert stored == {**self._REC, "stored_at": stored["stored_at"]}
+        assert before <= stored["stored_at"] <= after
 
     @pytest.mark.asyncio
     async def test_non_object_rejected(self, tmp_config) -> None:
