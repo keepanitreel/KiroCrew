@@ -406,6 +406,30 @@ function signInTargetFor(
 }
 
 /**
+ * Whether this row's sign-in cannot work on the KAS harness at all. A KAS session
+ * does not receive a server's own OAuth client settings (its `oauth` block, the
+ * `clientId` it names, and never a client secret), so a server set up with its
+ * own client has no sign-in there. A Connections provider is left to its card,
+ * and a sign-in Crew holds is Crew's, not the harness's.
+ * shortcut: keys on the configured client id alone; narrow it to servers that
+ * need a client secret once #34643 and an engine that keeps the block land.
+ */
+function kasCannotSignIn(s: McpServer, managedProvider: unknown, onKas: boolean): boolean {
+  return onKas && !managedProvider && !!s.clientId && !s.authCrewHeld
+}
+
+/** The row's sentence for a sign-in KAS cannot do. It offers no harness switch:
+ *  a Kiro CLI pick runs on KAS wherever kiro-cli offers its v3 engine
+ *  (`kiro_cli_pick_backend`), so the switch would not reach the sign-in either. */
+function KasSignInUnsupported() {
+  return (
+    <span className="text-warn text-[12px]" data-testid="mcp-sign-in-unsupported">
+      {i18nT('pages.overview.mcpTab.sign_in_unsupported_on_kas')}
+    </span>
+  )
+}
+
+/**
  * Only a hard failure is toned as an error; `needs_auth` rides the warn default.
  *
  * A held grant is the exception, and it is toned `muted` rather than `warn`: amber
@@ -891,7 +915,8 @@ export default function McpTab({ onManagedProviderClick }: McpTabProps = {}) {
             const base = s.presence || DEFAULT_PRESENCE
             const hasToolOverrides = pendingTools[s.name] && Object.keys(pendingTools[s.name]).length > 0
             const managedProvider = connectionProviderForServer(s)
-            const signInTarget = signInTargetFor(s, managedProvider, connectionsUi)
+            const signInUnsupported = kasCannotSignIn(s, managedProvider, kasChatNote)
+            const signInTarget = signInUnsupported ? undefined : signInTargetFor(s, managedProvider, connectionsUi)
             // Greyed like a pending uninstall, but not AS a pending uninstall: the
             // row is inert because its config lives elsewhere. The reason is SAID
             // on the row -- one line in the Tools cell naming the file to edit --
@@ -1059,11 +1084,14 @@ export default function McpTab({ onManagedProviderClick }: McpTabProps = {}) {
                           ? i18nT('pages.overview.mcpTab.status_invalid_value')
                           : notProbedReason
                             ? i18nT('pages.overview.mcpTab.not_probed')
-                            : mcpStatusLabel(s.status, mcpAuthState(s))}
+                            : signInUnsupported && mcpAuthState(s) === 'sign_in_required'
+                              ? i18nT('pages.overview.mcpTab.sign_in_unavailable')
+                              : mcpStatusLabel(s.status, mcpAuthState(s))}
                       </Badge>
                       {(() => {
                         // The signed-in tip names Kiro CLI's sign-in, which a Crew-held row does not use.
-                        const hint = s.authCrewHeld && mcpAuthState(s) === 'signed_in' ? undefined
+                        // The sign-in tips name a step that cannot finish where sign-in is unavailable.
+                        const hint = (s.authCrewHeld && mcpAuthState(s) === 'signed_in') || signInUnsupported ? undefined
                           : mcpStatusHint(s.status, s.name, mcpAuthState(s), s.probeFailing === true, notProbedReason)
                         return hint ? <InfoTip text={hint} placement="top" /> : null
                       })()}
@@ -1188,6 +1216,9 @@ export default function McpTab({ onManagedProviderClick }: McpTabProps = {}) {
                       {/* A server that advertised OAuth and failed may be holding a grant
                           that stopped working (expired, revoked, or minted for other
                           scopes). Signing in again is the remedy the row can offer. */}
+                      {!!s.authChallenge && !s.headers && signInUnsupported && (
+                        <span className="block mt-0.5"><KasSignInUnsupported /></span>
+                      )}
                       {!!s.authChallenge && !s.headers && signInTarget && (
                         <span className="flex flex-col items-start gap-1 mt-1">
                           <McpRowSignIn target={signInTarget} serverName={s.name} again kasChatNote={kasChatNote && !s.authCrewHeld} />
@@ -1210,7 +1241,9 @@ export default function McpTab({ onManagedProviderClick }: McpTabProps = {}) {
                        sentence that routes the user to chat (a link, because navigating
                        IS something the panel can do) and names the probe step that
                        repaints the row. */
-                    signInTarget ? (
+                    signInUnsupported ? (
+                      <KasSignInUnsupported />
+                    ) : signInTarget ? (
                       <McpRowSignIn target={signInTarget} serverName={s.name} kasChatNote={kasChatNote && !s.authCrewHeld} />
                     ) : (
                       <span className="text-warn text-[12px]">
