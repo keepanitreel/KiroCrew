@@ -327,9 +327,8 @@ export function AboutPanel() {
   // The background check's own verdict + command, so the 12-hourly check that
   // lights the nav badge lands the user on something actionable instead of an
   // Update button that 409s.
-  const statusChecked = useAppSelector(
-    s => s.dashboard.status?.update_check_status
-  ) === 'succeeded'
+  const statusCheckStatus = useAppSelector(s => s.dashboard.status?.update_check_status)
+  const statusChecked = statusCheckStatus === 'succeeded'
   const statusCommand = useAppSelector(s => s.dashboard.status?.update_command) || ''
   // The background check's commit distance, from the status push. What lets
   // the hero badge tell a diverged checkout from a current one on first
@@ -852,10 +851,18 @@ export function AboutPanel() {
   // changelog confirm because applying restarts the gateway.
   const gwUpdate = useAboutPanelGatewayUpdate(queryClient)
   const {
-    gwTargetDisplay, gwFound, gwAhead, gwBehind, gwChecked, gwSelfUpdatable, gwChannel,
+    gwTargetDisplay, gwFound, gwAhead, gwBehind, gwChecked, gwError, gwSelfUpdatable, gwChannel,
     gwChannelError, gwCommand, showConfirm, setShowConfirm, restarting, gwCheck, gwApply,
     gwChannelMutation,
   } = gwUpdate
+  // A check that RAN and failed is not "not checked yet": the backend stamps
+  // the last-checked time on failure too, so the Updates card reads "Last
+  // checked 1m ago" right below the pill. Same condition as that card's red
+  // "Couldn't check for updates" line, plus the background check's verdict.
+  // A manual failure is the newest answer, so it also outranks an older
+  // background "succeeded" that the next status frame has not replaced yet.
+  const manualCheckFailed = gwCheck.isError || (gwCheck.isSuccess && !!gwError)
+  const heroCheckFailed = statusCheckStatus === 'failed' || manualCheckFailed
   // Diverged: local commits on top of a moved upstream. `update_available` is
   // false there BY DESIGN (the apply path is a destructive reset), so this is
   // derived from the counts rather than from any availability flag — it is the
@@ -1073,15 +1080,20 @@ export function AboutPanel() {
                     style={{ color: 'var(--warn)', background: 'color-mix(in oklab, var(--warn) 14%, transparent)' }}
                     data-testid="hero-channel-move-pending">
                     <AlertCircle size={11} className="lucide-inline" /> {i18nT('pages.settings.aboutPanel.not_on_channel_yet', { channel: effectiveGwChannel })}</span>
-                : (gwChecked || statusChecked)
+                : (gwChecked || (statusChecked && !manualCheckFailed))
                   ? <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold rounded-full px-2 py-0.5"
                       style={{ color: 'var(--ok)', background: 'color-mix(in oklab, var(--ok) 14%, transparent)' }}
                       data-testid="hero-up-to-date">
                     <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: 'var(--ok)' }} /> {i18nT('pages.settings.aboutPanel.up_to_date')}</span>
-                  // No verdict yet (never checked, or the check failed). A green
-                  // "Up to date" here is the same half-truth the check contract
-                  // kills: it would sit beside a red "Couldn't check for updates"
-                  // on this very screen. Stay neutral until something is known.
+                  // No verdict yet. A green "Up to date" here is the same
+                  // half-truth the check contract kills: it would sit beside a
+                  // red "Couldn't check for updates" on this very screen. A check
+                  // that failed says so; one that never ran stays neutral.
+                  : heroCheckFailed
+                  ? <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold rounded-full px-2 py-0.5"
+                      style={{ color: 'var(--warn)', background: 'color-mix(in oklab, var(--warn) 14%, transparent)' }}
+                      data-testid="hero-check-failed">
+                    <AlertCircle size={11} className="lucide-inline" aria-hidden /> {i18nT('pages.settings.aboutPanel.check_failed_pill')}</span>
                   : <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold rounded-full px-2 py-0.5 text-muted bg-bg-accent"
                       data-testid="hero-not-checked">
                     <span className="w-1.5 h-1.5 rounded-full inline-block bg-muted" /> {i18nT('pages.settings.aboutPanel.not_checked_yet')}</span>

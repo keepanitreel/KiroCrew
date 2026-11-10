@@ -17937,6 +17937,7 @@
         "manual_install_fallback": "更新がうまくいかない場合は、{{link}} をして、このコピーの上に再インストールできます。設定、チャット、ファイルは保持されます。",
         "nightly": "Nightly",
         "not_checked_yet": "まだ確認していません",
+        "check_failed_pill": "確認できませんでした",
         "open_source_under_the_apache_2_0_license": "Apache 2.0 ライセンス下のオープンソース",
         "platform": "プラットフォーム",
         "prerelease_report_prompt": "早期ビルドを実行していただきありがとうございます。Stable よりもテストが少ないため、物事は壊れることがあります — 何か間違っているように見える場合は、<report>GitHub で報告</report>してください。そうすればすべての人に到達する前に修正されます。",

@@ -610,6 +610,28 @@ describe('AboutPanel gateway update check', () => {
     expect(screen.queryByTestId('hero-up-to-date')).toBeNull()
   })
 
+  it('a background check that ran and failed is not "Not checked yet"', async () => {
+    // The backend stamps `update_last_checked_at` on failure too, so the card
+    // below reads "Last checked ..." and the pill must not deny the check ran.
+    stubFetch({})
+    pushStatus({ update_check_status: 'failed', update_last_checked_at: 1_700_000_000 })
+    mountWeb()
+    expect(await screen.findByTestId('hero-check-failed')).toBeTruthy()
+    expect(screen.queryByTestId('hero-not-checked')).toBeNull()
+    expect(screen.queryByTestId('hero-up-to-date')).toBeNull()
+  })
+
+  it('a manual failure outranks an older background "succeeded"', async () => {
+    stubFetch({ check_status: 'failed', update_available: null, error_code: 'feed_unreachable' })
+    pushStatus({ update_check_status: 'succeeded', update_available: false })
+    mountWeb()
+    expect(await screen.findByTestId('hero-up-to-date')).toBeTruthy()
+    await pressCheck()
+    await screen.findByTestId('check-failed')
+    expect(screen.getByTestId('hero-check-failed')).toBeTruthy()
+    expect(screen.queryByTestId('hero-up-to-date')).toBeNull()
+  })
+
   it('the hero pill goes green once a check reports current', async () => {
     stubFetch({ check_status: 'succeeded', update_available: false, error_code: null })
     mountWeb()
@@ -624,7 +646,9 @@ describe('AboutPanel gateway update check', () => {
     await pressCheck()
     await screen.findByTestId('check-failed')
     expect(screen.queryByTestId('hero-up-to-date')).toBeNull()
-    expect(screen.getByTestId('hero-not-checked')).toBeTruthy()
+    // It ran, so the pill names the failure rather than "Not checked yet".
+    expect(screen.getByTestId('hero-check-failed')).toBeTruthy()
+    expect(screen.queryByTestId('hero-not-checked')).toBeNull()
   })
 
   // The gateway's `auto_update` row is one SettingsToggle in every state. The

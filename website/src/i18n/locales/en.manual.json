@@ -8710,6 +8710,7 @@
         "update_check_managed_by_app": "This build updates through the app, not the gateway.",
         "update_check_managed_by_image": "This container updates by pulling a newer image.",
         "not_checked_yet": "Not checked yet",
+        "check_failed_pill": "Couldn't check",
         "auto_update_notify_only_on_this_install": "This install cannot apply updates itself, so it only notifies.",
         "auto_update_notify_manual_apply": "Updates are not installed automatically here. When one is available, use Update to install it.",
         "install_app_updates_automatically": "Install app updates automatically",

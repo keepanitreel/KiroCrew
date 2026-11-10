@@ -18901,6 +18901,7 @@
         "manual_install_fallback": "Se l'aggiornamento non funziona, puoi {{link}} e reinstallare sopra questa copia. Le tue impostazioni, chat e file vengono mantenuti.",
         "nightly": "Nightly",
         "not_checked_yet": "Non ancora controllato",
+        "check_failed_pill": "Impossibile controllare",
         "open_source_under_the_apache_2_0_license": "Open source con licenza Apache 2.0",
         "platform": "Piattaforma",
         "prerelease_report_prompt": "Grazie per usare le build anticipate. Sono testate meno di Stable, quindi qualcosa si rompe — quando qualcosa non va, <report>segnalalo su GitHub</report> così viene corretto prima che arrivi a tutti.",

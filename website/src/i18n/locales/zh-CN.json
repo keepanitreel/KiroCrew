@@ -17937,6 +17937,7 @@
         "manual_install_fallback": "如果更新无法完成，你可以{{link}}并覆盖安装。你的设置、对话和文件都会保留。",
         "nightly": "每日构建",
         "not_checked_yet": "尚未检查",
+        "check_failed_pill": "无法检查",
         "open_source_under_the_apache_2_0_license": "基于 Apache 2.0 许可证开源",
         "platform": "平台",
         "prerelease_report_prompt": "感谢你试用早期版本。它们的测试不如 Stable 充分，出问题是常事——发现异常时，请<report>到 GitHub 提交问题</report>，让它在影响所有人之前得到修复。",

@@ -18901,6 +18901,7 @@
         "manual_install_fallback": "Si la mise à jour ne fonctionne pas, vous pouvez {{link}} et réinstaller par-dessus cette copie. Vos paramètres, conversations et fichiers sont conservés.",
         "nightly": "Nightly",
         "not_checked_yet": "Pas encore vérifié",
+        "check_failed_pill": "Vérification impossible",
         "open_source_under_the_apache_2_0_license": "Open source sous licence Apache 2.0",
         "platform": "Plateforme",
         "prerelease_report_prompt": "Merci d'utiliser les versions précoces. Elles sont moins testées que Stable, donc des choses cassent — quand quelque chose ne va pas, <report>signale-le sur GitHub</report> pour que ce soit corrigé avant que tout le monde soit touché.",
