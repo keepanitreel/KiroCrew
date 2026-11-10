@@ -108,6 +108,7 @@
         "session_manager_chain": false,
         "peer_steer_loss_recovery": false,
         "member_dispatch": true,
+        "member_branch_prefix": "crew/",
         "conductor_own_child_verbs": true,
         "crew_panel": true,
         "subagent_cost_gb": 0.5,
@@ -1717,6 +1718,20 @@
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": true
+    },
+    {
+      "path": "agent.member_branch_prefix",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Bot branch prefix",
+      "help": "The start of the git branch a bot's new worktree is cut on, before <bot>/<repo>: 'alice/' gives alice/reviewer/myservice. Each part between slashes may use only letters, digits, '.', '_' and '-', may not start or end with '.' or '-', has no '..' and no '.lock' ending, and is at most 40 characters; an empty or rejected value uses crew/. The first part must not be the name of a branch the repository has, such as main. Takes effect live for the next new worktree; one that exists keeps its branch, and one made again after its folder was deleted takes the current prefix.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": "crew/"
     },
     {
       "path": "agent.conductor_own_child_verbs",
@@ -6457,6 +6472,7 @@
       "defaultValue": {
         "max_open_files": null,
         "max_processes": null,
+        "max_user_processes": null,
         "max_memory_mb": null,
         "max_address_space_mb": null,
         "max_cpu_seconds": null,
@@ -6493,7 +6509,22 @@
       "sensitive": false,
       "tags": [],
       "label": "Max processes",
-      "help": "READ BY TWO MECHANISMS with different meanings for 0. As RLIMIT_NPROC it caps processes for the child's real UID, and 0 leaves the inherited limit unchanged (the default -- see the per-UID caveat in security._RLIMIT_DEFAULTS). As the cgroup TasksMax it counts TASKS (threads) in the scope, where 0 is rejected by systemd, so 0 or unset means the module default.",
+      "help": "Per-scope TASK budget: the cgroup TasksMax on Linux, which counts TASKS (threads), and the Job object ActiveProcessLimit on Windows. 0 is rejected by systemd, so 0 or unset means the module default. It sets no POSIX rlimit; the per-user process cap is the separate max_user_processes.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": null,
+      "nullable": true
+    },
+    {
+      "path": "resource_limits.max_user_processes",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Max user processes",
+      "help": "RLIMIT_NPROC on the tool and build processes the gateway spawns, opt-in; the ACP session host and what it starts keep the inherited limit. The kernel counts every process and thread of the gateway's user, not one spawn's tree, so a cap below what that user already runs stops those spawns from forking. 0 or unset leaves the inherited limit unchanged (the default). Set it only when the gateway runs as its own dedicated user. Not used by the cgroup path.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": null,
@@ -6687,7 +6718,8 @@
           "folder": null,
           "agent": null,
           "model": null,
-          "reasoning_effort": null
+          "reasoning_effort": null,
+          "approval_mode": null
         }
       }
     },
@@ -7070,14 +7102,15 @@
         "slack"
       ],
       "label": "Code Channel Defaults",
-      "help": "Folder, agent, model and reasoning effort a new code-channel session starts with. Takes effect on the next new code channel; no restart.",
+      "help": "Folder, agent, model, reasoning effort and approval mode a new code-channel session starts with. Takes effect on the next new code channel; no restart.",
       "hasChildren": true,
       "enumValues": null,
       "defaultValue": {
         "folder": null,
         "agent": null,
         "model": null,
-        "reasoning_effort": null
+        "reasoning_effort": null,
+        "approval_mode": null
       }
     },
     {
@@ -7145,6 +7178,27 @@
       "help": "Reasoning effort new code-channel sessions start with: low, medium, high, xhigh or max. Empty keeps the agent's own effort. Ignored on models that do not support effort.",
       "hasChildren": false,
       "enumValues": null,
+      "defaultValue": null,
+      "nullable": true
+    },
+    {
+      "path": "slack.code_channel_defaults.approval_mode",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "slack"
+      ],
+      "label": "Default Approval Mode",
+      "help": "Tool approval mode new code-channel sessions start in: ask (the default: look-ups such as file reads, web searches and read-only shell commands run on their own, everything else asks), trust_reads (also searches of memory, past chats, skills and the knowledge library) or trust (every tool runs without asking). Trust lets anyone allowed to talk to the bot in the channel drive an agent whose tools run unprompted, and sessions it spawns inherit that. The mode can still be changed on the session afterwards.",
+      "hasChildren": false,
+      "enumValues": [
+        "ask",
+        "trust_reads",
+        "trust"
+      ],
       "defaultValue": null,
       "nullable": true
     },

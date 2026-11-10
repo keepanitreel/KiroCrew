@@ -1329,38 +1329,31 @@ The prior file is snapshotted BEFORE the replace (the write path unlinks a legac
 symlink first, so reading afterwards would find nothing). An unreadable prior file
 means "nothing to preserve", never "abort the refresh".
 
-**An update carries the edits across its own deregister.** The local-source branch
-of `POST /api/apps/{name}/update` deregisters the app before re-registering it, and
-deregistering deletes the agent files, so the re-registration would find no prior
-file. That branch therefore snapshots the app's agent files first
-(`snapshot_app_agent_configs`, regular files only, keyed by file name) and hands
-the snapshot to `register_app(name, prior_agent_configs)`; an agent with no file
-on disk takes its prior config from it. The failed-update restore uses the same
-snapshot. An agent the new version renames or drops gets nothing from the snapshot.
-
-**A registry update keeps the agent files instead.** The update route's registry
-branch and a registry install over an installed app deregister with
+**An update keeps the agent files.** Both branches of `POST /api/apps/{name}/update`
+and a registry install over an installed app deregister with
 `deregister_app(name, keep_agents=True)` (§17), so registration rewrites each file in
 place and reads the edits from it. A file it does not rewrite keeps its last good
 copy, as on the boot reconcile: a full disk, a data home that does not own a shared
 agents directory (registration declines to write there, and a deleted file would
-never come back), or an agent the new version ships unreadable. After the take-down
-`_reinstall_from_registry` prunes the files the installed manifest no longer
+never come back), or an agent the new version ships unreadable. Once the new files
+are in, `_prune_dropped_resources` removes the files the installed manifest no longer
 declares (`_prune_stale_app_resources`), and an app the update left unable to run
-loses them all: suspended on success, deregistered on a failure. Pinned by
-`test_a_registry_update_keeps_an_agent_file_it_cannot_rewrite` and
-`test_a_registry_update_that_needs_consent_leaves_no_agent_file`.
+loses them all: suspended on success, deregistered on a registry failure (a failed
+local update restores the old tree and record together, so its app runs as before).
+Pinned by `test_an_update_keeps_an_agent_file_it_cannot_rewrite` and
+`test_an_update_that_needs_consent_leaves_no_agent_file`.
 
-Both keep a user's `model` or `description` across a registry update, a pin-follow of
-an adopted former built-in, or a local update. Disable and re-enable still start from
-the template: a disabled app keeps no agent file and no snapshot, so the same is true
-when an update newly asks for `sessionApproval` and suspends the app.
+This keeps a user's `model` or `description` across a registry update, a pin-follow
+of an adopted former built-in, or a local update. Disable and re-enable still start
+from the template: a disabled app keeps no agent file, so the same is true when an
+update newly asks for `sessionApproval` and suspends the app. No route passes
+`register_app`'s `prior_agent_configs` (a `snapshot_app_agent_configs` taken before
+a deregister that deletes the files).
 
 Writer: `apps/bridges_agents.py::_register_agents`, `_preserve_user_agent_edits`,
-`_read_agent_config`, `snapshot_app_agent_configs`; the update route
-`apps/routes_install.py::handle_update_app` with
-`apps/routes_lifecycle.py::_snapshot_agent_configs_off_loop` and
-`_reinstall_from_registry`.
+`_read_agent_config`; the update route `apps/routes_install.py::handle_update_app`
+with `apps/routes_lifecycle.py::_reinstall_from_registry` and
+`_prune_dropped_resources`.
 
 ## 4. A generated prompt is pinned through the app's policy
 
@@ -2314,8 +2307,11 @@ verb with NO gateway-less path. Only the gateway's process can run that chain; a
 file-only `update_app` would leave a running gateway serving the old manifest over
 new files — the half-updated state the route exists to prevent — and on Windows the
 swap fails under the backend's open files anyway. So when the lifecycle client
-reports "no gateway", including on the AF_UNIX-less platforms where one may well be
-running, the CLI changes nothing, exits 1 and points at the app's page in the dashboard. The CLI
+reports "no gateway", the CLI changes nothing, exits 1 and points at the app's page
+in the dashboard. On an AF_UNIX-less platform (native Windows) no gateway can take
+the request, so the CLI does not ask: before reading any secret it exits 1, says the
+verb is not available there and points at the app page's Update (or Sync) button, rather than
+telling the operator to start a gateway that may well be running. The CLI
 makes a given `--source` absolute (the gateway resolves paths against its own
 working directory), refuses an empty one rather than reading it as the current
 directory, and sends no body without the flag, so the gateway uses the app's
@@ -2809,9 +2805,12 @@ taken raises, so no writer runs unserialized. On the event-loop thread the
 acquire is single-shot, as `file_lock` is everywhere.
 
 `permissions.api` and `permissions.events` are read live as well, and an update
-that adds any entry to either is held back rather than disabled. Each app stores
-the entries the owner has approved in `approved-grants.json`
-(`{"api": [...], "events": [...]}`) beside `installed.json`, and every
+that adds any entry to either is held back rather than disabled. The entries the
+owner has approved for each app are stored in
+`member-records/app-grants/<app>.json` (`{"api": [...], "events": [...]}`,
+`apps.protected_app_state`), outside the app's own tree: code in the app's
+sandbox can write `apps/<name>/`, and `member-records/` is masked in every
+sandbox mode. Every
 enforcement point -- `token_auth._app_api_allowlist`,
 `ws_event_scope._read_declared_events`, and the hook context's event bus via
 `approved_manifest_permissions` -- grants only entries the live manifest
@@ -2819,8 +2818,8 @@ declares AND that file holds (`staged_app_grants`, which reads the manifest,
 the record and the file fresh on each call). The set has its own file so that
 the many `installed.json` writers (dev mode, enable/disable, provenance, the
 builtin sync) structurally cannot write a stale copy of it: only the
-grant-owning paths below touch it, each with one atomic write, and no lock is
-needed.
+grant-owning paths below touch it, each with one atomic write. Each of them runs
+the one-time import first, so the import's lock is the only lock needed.
 
 - **Writing the set.** `install_app` and a first `register_external_app` store
   what the manifest declares (installing is the consent moment), before the
@@ -2831,20 +2830,36 @@ needed.
   (caller `app_update`, or `app_register` for a re-registration) and says so in
   its message, and the app stays enabled. The set only ever narrows on these
   paths, so it is written before the manifest it goes with. `update_app` writes
-  it into the new tree before the record (the file is in `_COPY_IGNORE`, so a
-  source tree cannot ship one), and a failed update's rollback restores the old
-  tree's file with the old tree; a failed re-registration puts back the prior
-  file, or removes it if there was none. Gateway-shipped builtins carry no set:
-  they change with the gateway, not through an update.
-- **Backfill.** An install whose `installed.json` has never recorded
-  `approvedGrantsStored` (from before the file, or a builtin) and has no
-  `approved-grants.json` approves what its manifest declares, so no app loses
-  access on upgrade; its first update or re-registration takes that as the
-  previous set (`_effective_approved_grants`). Once the record carries
-  `approvedGrantsStored` (kept set by every record write while the file exists), a
-  missing file approves nothing, because it is a file an update's tree swap has
-  not put back yet or one that was lost; the app row shows an empty `approvedGrants`
-  the owner can approve again.
+  it before the record (a source tree's own `approved-grants.json` is in
+  `_COPY_IGNORE` and is never read), and a failed update or re-registration puts
+  back the stored set exactly as it was (`_approved_grants_snapshot` /
+  `_restore_approved_grants`). Uninstall removes it, so a later app under the
+  name starts with nothing approved; a failed uninstall, including a removal of
+  the two records that stops halfway, puts it back (uninstall holds `app_record_lock` throughout, so a
+  concurrent enable or disable waits and its record is never rolled back)
+  (`protected_app_state.snapshot_app` / `restore_app`). A gateway-shipped builtin
+  is stored as `approveDeclared` with its first record (`register_builtin_apps`):
+  it changes with the gateway, not through an update.
+- **Import and backfill.** The first read in the gateway carries every app's
+  set over once (`_import_app_tree_grants`): an `apps/<name>/approved-grants.json`
+  from an older build is copied, a record that never stored a set
+  (`approvedGrantsStored` absent) is stored as `{"approveDeclared": true}` and keeps
+  approving what its manifest declares, so no app loses access on upgrade, and a
+  record that stored a set and lost the file, or whose file is unreadable or not a
+  mapping, is stored with an empty list for every family (a family left out would
+  approve what the manifest declares). The marker
+  `.imported-from-app-tree` then closes the import: the app tree is never read
+  again. The whole pass, from the marker check to the marker write, holds the
+  file lock `app-grants/.importing`, so two importers (threads or processes)
+  never interleave and an owner's approval is never overwritten by an importer
+  that read the store before it. The same pass carries every disable from an
+  older build over: a record reading `enabled: false`, or one it cannot read, gets
+  `app-disabled/<app>` (`_disabled_before_upgrade`), except a built-in still owed
+  its default-on promotion, which `backfill_default_on_builtins` turns on. After it, the store alone decides: a missing record approves nothing, and
+  neither a file the app writes in its tree nor `approvedGrantsStored` in
+  `installed.json` can widen a set. The app row shows an empty `approvedGrants` the
+  owner can approve again. A register with no manifest yet stores
+  `approveDeclared`.
 - **Approval.** The detail page lists the held-back entries under "API access"
   and "WebSocket events" (the Permissions card's labels) with a plain-words line
   for each group, and tags them "not approved" on the Permissions card. Its
@@ -2863,13 +2878,26 @@ needed.
   and WebSocket caches pick an approval up within their refresh interval.
   `get_app` is read-only, like `list_apps`.
 - **Failure direction is closed.** An install without the file whose old
-  manifest is unreadable gives an empty previous set on update; an
-  `approved-grants.json` that cannot be read, or holds anything but a mapping
+  manifest is unreadable gives an empty previous set on update; a stored set
+  that cannot be read, or holds anything but a mapping
   (including `[]`, `false`, `null`), approves nothing; and an app directory with
   no readable record (corrupt, or mid-update between the tree swap and the new
   record) grants no entry. Grant reads also return no entry while an update is
   swapping the app tree, whether a marker directory is held across the swap or the
   swap spans the read (`staged_app_grants`, `_tree_swap_spanned`).
+- **The owner's disable stands outside the tree too.** `disable_app`, and any
+  record write that turns an enabled app off (a widening update or re-registration
+  waiting for consent, the boot consent reconcile), first writes
+  `member-records/app-disabled/<app>`. `update_app` decides "turns it off" from
+  the record it read before its tree swap, which leaves no record on disk to
+  compare against. While it exists every reader of
+  `installed.json` (`_read_installed`, so `is_app_enabled`, `get_app` and the
+  permission checks, and `app_enabled_state`) reports the app disabled whatever
+  the file says, so the app's own code cannot turn itself back on. Only the
+  owner-authenticated `enable_app` removes it, after it has run the one-time
+  import itself so no importer re-records it; uninstall removes the approved set
+  first and the disable only once the tree is gone, and a failed update, re-registration or uninstall puts it back as
+  it was.
 
 `sessionApprovalConsentPending` keeps its own disable-until-consent shape: that
 grant is enforced through the enabled flag on several session routes rather
@@ -6234,7 +6262,7 @@ records which module owns which part, so a change lands in its owner.
 | Module under `src/kiro_crew/apps/` | Owns |
 |---|---|
 | `routes.py` | The facade: the only import path and patch surface, installing `kiro_crew._facade_mirror` over the owners below, and the route table (`register_app_routes`) |
-| `routes_lifecycle.py` | The steps the install, update, uninstall, enable and disable handlers share: `_check_min_version`, the dual-pass warning redactor `_redact_warning`, `_register_app_off_loop` / `_deregister_app_off_loop`, `_start_backend_after_install`, `_stop_backend_and_observe`, `_app_may_run_after_install`, `_restore_app_after_failed_update`, `_reinstall_from_registry`, `_suspend_app_for_session_approval_reconsent`, `_refuse_while_startup_hook_runs`, `_unregister_notification_channels`, the `app_reload` announcement after a route replaced an app's files (`_announce_app_ui_changed`), and the `setup.onEnable` runner Enable and every update of an enabled app share (`_run_on_enable_script`, `_rerun_on_enable_after_update`) with the client-install platform check (`_client_install_manifest`) and the bell note for a failed re-run (`_note_on_enable_failed_after_update`) |
+| `routes_lifecycle.py` | The steps the install, update, uninstall, enable and disable handlers share: `_check_min_version`, the dual-pass warning redactor `_redact_warning`, `_register_app_off_loop` / `_deregister_app_off_loop`, `_start_backend_after_install`, `_stop_backend_and_observe`, `_app_may_run_after_install`, `_restore_app_after_failed_update`, `_prune_dropped_resources`, `_reinstall_from_registry`, `_suspend_app_for_session_approval_reconsent`, `_refuse_while_startup_hook_runs`, `_unregister_notification_channels`, the `app_reload` announcement after a route replaced an app's files (`_announce_app_ui_changed`), and the `setup.onEnable` runner Enable and every update of an enabled app share (`_run_on_enable_script`, `_rerun_on_enable_after_update`) with the client-install platform check (`_client_install_manifest`) and the bell note for a failed re-run (`_note_on_enable_failed_after_update`) |
 | `routes_proxy.py` | The reverse proxy from an app's dashboard UI to its own backend (`handle_app_api_proxy`): `_resolve_app_backend_url`, the per-app secret cache it signs with (`_get_app_secret`, `invalidate_app_secret_cache`), the principal claim (`_proxy_principal`), the headers and the `token` query credential it strips (`_forwarded_query`) and the event-stream relay |
 | `routes_static.py` | An installed app's UI bundle (`handle_app_ui_file`, `_open_ui_file` and the stream bounds), the content types the UI and art routes answer with, and `handle_app_dev_mode` |
 | `routes_art.py` | The installed-art route (`handle_app_art_file`) over an app's manifest-declared art (`_declared_art_paths`, `_read_declared_art`), and the git blob proxy (`handle_blob_proxy`, `_fetch_git_blob`) with the repository and ref validators (`_is_safe_repo_identifier`, `_SAFE_REF_RE`), the fetch timeout and concurrency bound, and the blob-cache touch. Both art paths screen on one extension set |
@@ -6737,7 +6765,10 @@ about `kirocrew-lite`, and a default that cannot be resolved is a refusal. The
 session is then opened BY that name (`get_or_create(key, agent=<name>)`, never
 `None`): a cold start with a `None` agent launches the literal `kirocrew`
 (`providers/acp_runtime_start.py`), not `agent.default_agent`, so passing the name
-is what makes the agent that starts the agent the ceiling was asked about. Once
+is what makes the agent that starts the agent the ceiling was asked about. `run`
+also names its app as the allocation's `owning_app`, so the session's own
+governance reads, its KAS projection among them, judge under the app its gate
+judges (`governance.md`, the trusted sub-agent allow). Once
 the lease is held, the agent the turn carries is read back from the session
 manager's record (`get_agent(key)`) on every path, `run` and `run_oneshot` alike:
 a reused session answers with the agent it started as, which is asked about again
@@ -7573,11 +7604,12 @@ parent can be renamed from under its deny; only the entries are guarded, not the
 contents. The spawn that lifts a leaf (the app's own backend, below) leaves that
 spelling's parents unguarded, so the backend can create, rotate and remove the folders it
 keeps its credential in. A namespace mask is a mount, which moves with a renamed parent,
-so that plan gains no guard. No seal, tool-gate row or keystone disposition
-reads a declaration, and the one carve-out that does (the app's own backend, below)
-never lifts a core leaf, so a manifest can only add masks.
-`test_sandbox_governance_mask.py`'s pin over the three dispositions is untouched: it is
-over the core tables, and a declared leaf is never on the tool-gate floor.
+so that plan gains no guard. No seal or keystone disposition reads a declaration, the
+tool gate reads the shipped built-ins' only, as more refusals (`declared_crew_leaves(installed=False)`, in
+`security._CREW_SECRET_LEAVES`), and the one carve-out that does (the app's own backend,
+below) never lifts a core leaf, so a manifest can only add masks. A built-in's declared
+leaf on the tool-gate floor is HIDDEN in the spawn plan, so
+`test_sandbox_governance_mask.py`'s pin over the three dispositions holds for it.
 
 **The app's own backend.** `sandbox_tiers.app_declared_mask_targets(name, builtin=...)`
 returns the declared leaves as every mask spells them, minus any leaf that is a core

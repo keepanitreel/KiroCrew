@@ -170,7 +170,13 @@ Once the wheel is in, the installer runs the new `kirocrew kas install` to
 download the [built-in KAS engine](#first-run) this release pins (about 55-70 MB
 for your platform). If that download fails, for example on a host with no
 access to the CDN, the install still succeeds and the installer prints the
-command to retry. Pass `--no-kas` (or set `KIROCREW_INSTALL_KAS=0`) to skip it:
+command to retry. On a host that cannot run the engine at all (no build for its
+platform, or a glibc older than the engine needs), Kiro Crew stays installed and
+the installer says why a chat on the default agent cannot start there in place
+of its next steps. A first install then exits 3; a re-run over an existing
+install, which is what `kirocrew update` does, exits 0. Pass `--no-kas` (or set
+`KIROCREW_INSTALL_KAS=0`) to skip the engine, for example on a host whose agent
+does not use it:
 
 ```bash
 curl -fsSL https://download.crew.kiro.dev/cli.sh | sh -s -- --no-kas
@@ -270,7 +276,11 @@ interpreter cannot be downloaded and a usable system Python 3.12+ exists, the
 run falls back to it with a warning (and retries the managed default next
 time); air-gapped hosts can point `KIROCREW_UV_URL` at a mirror of the uv
 release tree and `UV_PYTHON_INSTALL_MIRROR` at a mirror of the interpreter
-archives — the pinned SHA-256 digests are enforced either way. The signed
+archives — the pinned SHA-256 digests are enforced either way. Behind a
+TLS-intercepting proxy, uv's own bundled certificate roots refuse the
+interpreter download (`UnknownIssuer`) even when the system trusts the proxy's
+CA, so the installer retries that download once on the system certificate store
+(`UV_NATIVE_TLS=1`); a `UV_NATIVE_TLS` you set yourself is left as it is. The signed
 installer never pipes an unsigned third-party script into a shell: uv is
 fetched as a tarball and verified against pinned digests, exactly like the
 wheel itself. On a terminal the wheel download draws curl's progress bar and
@@ -880,7 +890,11 @@ When another gateway already serves the same data home, the unit exits 78 and
 goes `failed` once instead of restarting, because the unit's
 `RestartPreventExitStatus=` names that code. A unit file without that directive
 keeps relaunching against the refusal; re-run `kirocrew service install` to
-rewrite it. See [Service Management](../system-specs/modules/cli.md#service-management)
+rewrite it. A unit installed before v0.10.0 on systemd 219 (Amazon Linux 2,
+RHEL 7) has the same fix: its restart cap sits where 219 does not read it, so a
+gateway that fails at boot restarts without end. `kirocrew service status` and
+`kirocrew doctor` name either one. See
+[Service Management](../system-specs/modules/cli.md#service-management)
 in the CLI spec for the details.
 
 ### SELinux-enforcing hosts with kirocrew under `$HOME`

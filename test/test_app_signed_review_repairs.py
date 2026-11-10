@@ -422,7 +422,7 @@ async def test_traversal_error_refuses_signed_route_hook(
             ctx.health.mark_degraded.assert_called_once()
             error = ctx.health.mark_degraded.call_args.args[0]
             assert "bytecode cleanup failed" in error
-            assert "traversal refused" in error and str(blocked) in error
+            assert "traversal refused" in error and repr(str(blocked)) in error
         else:
             ctx.health.mark_degraded.assert_not_called()
         assert (cache / "marker.pyc").read_bytes() == b"harmless"

@@ -219,8 +219,8 @@ _BASE_SLOT_MEMBERS: dict[str, tuple[str, bool, bool, str]] = {
         "(self, prompt: 'str', run_chat_coro: 'Callable[[DashboardState, "
         "_ChatSlot, str], Coroutine[Any, Any, None]]', state: "
         "'DashboardState', *, extra_meta: 'dict[str, Any] | None' = None, "
-        "relay_meta: 'dict[str, Any] | None' = None, workflow_followup: 'bool' = "
-        "False) -> 'bool'",
+        "relay_meta: 'dict[str, Any] | None' = None, gateway_prompt_kind: 'str' = "
+        "'') -> 'bool'",
     ),
     "flush_deferred_notes": (
         "function",
@@ -622,6 +622,7 @@ _BASE_SLOT_DEFAULTS: dict[str, tuple[str, str | None]] = {
     "_steer_rpc_in_flight": ("value", "set()"),
     "_native_steer_in_flight": ("value", "set()"),
     "_steer_segment_cut": ("value", "None"),
+    "_compact_command_turn": ("value", "False"),
     "_steer_send_ids": ("value", "{}"),
     "_steer_user_origin": ("value", "{}"),
     "_stop_declined_at": ("value", "0.0"),
@@ -688,6 +689,7 @@ _BASE_SLOT_DEFAULTS: dict[str, tuple[str, str | None]] = {
     "_wait_state": ("value", "None"),
     "_wait_steer_baseline": ("value", "0.0"),
     "_wake_starting_task": ("value", "None"),
+    "_welcome_preview": ("type", "builtins.tuple"),
     "_welcomed_agent": ("value", "''"),
     "_window_loader_thread": ("value", "None"),
     "_window_swap_applying": ("value", "None"),

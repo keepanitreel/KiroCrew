@@ -337,9 +337,9 @@ const WAIVED_BARE_CONTROLS: Record<string, { counts: BareCounts; reason: string 
     reason: 'the settings search box itself',
   },
   'SlackCodeChannelDefaults.tsx': {
-    counts: { SimpleSelect: 3 },
+    counts: { SimpleSelect: 4 },
     reason:
-      'the code-channel default folder, agent and effort pickers: one nested ' +
+      'the code-channel default folder, agent, effort and approval-mode pickers: one nested ' +
       'slack.code_channel_defaults object, reached through the Code channels switch the ' +
       'extractor indexes (channels.code-channels-slack), which reveals them',
   },
@@ -413,6 +413,14 @@ describe('settings coverage gate — bare controls', () => {
  * skipped"; this pins each one so a new silent skip fails the build.
  */
 const EXPECTED_DYNAMIC_SKIPS: Record<string, { count: number; reason: string }> = {
+  'ConnectionsPanel.tsx': {
+    count: 1,
+    reason:
+      'the shared-save switch on each Google card is labelled with the other Google ' +
+      'products the list returned ("Also save on Google Drive, …"), so there is no fixed ' +
+      'label; search reaches the card through the manual "OAuth app" entry, and the ' +
+      'switch sits inside that card',
+  },
   'BrowserLiveSection.tsx': {
     count: 1,
     reason:

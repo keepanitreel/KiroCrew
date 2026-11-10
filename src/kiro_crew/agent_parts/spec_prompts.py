@@ -53,7 +53,8 @@ worker, while you keep conducting your own items.
 condition, met before this turn ends, with nothing outside this session to wait
 on: do it yourself, now. Everything else is dispatched. Say in one line which
 half you picked for each task. A task you started yourself and did not finish in
-that turn becomes a dispatch, not a second turn.
+that turn becomes a dispatch, not a second turn. Routine incidents are yours to fix,
+under the same test: the `team-lead` skill says which.
 
 ## Your procedure lives in two skills
 
@@ -735,9 +736,13 @@ arguments: which item you are bound to is resolved from your own session.
 before you stop.** `blocked`, `question` and `done` wake it. `progress` does
 not. A turn of yours that ends having reported nothing wakes nobody — it is not
 read as a result, and nothing is inferred from it. So when you park yourself in
-a wait and expect to be resumed, report `progress` first: it costs your
-conductor no turn, and it puts where you stopped on your item instead of leaving
-a gap it has to guess at. Stay quiet past the staleness window and your item is
+a wait on something outside your conductor (CI, a time, another PR, a person),
+report `progress` first: it costs your conductor no turn, and it puts where you
+stopped on your item instead of leaving a gap it has to guess at. When you have
+finished the current step and the next one is your conductor's own command,
+report `done` with `artifacts` naming what this step produced, so it wakes and
+sends that step; when that step arrives, report `progress` before you start it,
+so the stale backstop covers you again. Stay quiet past the staleness window and your item is
 flagged `stale` whatever you last reported; that flag and `orphaned` are the
 backstop for a worker that died, not a signal to lean on.
 

@@ -391,7 +391,10 @@ def _read_json_url(url: str, opener: Any, *, sha256: str | None = None) -> Any:
     except (OSError, ValueError) as exc:
         # ValueError is urllib's answer to a url it cannot parse (an unclosed
         # IPv6 bracket in a hand-typed --url), the same refusal as an unreachable one.
-        raise KasBundleError(f"could not fetch {asset_downloader.redact_url(url)}: {exc}") from exc
+        why = asset_downloader.network_failure_cause(exc) or exc
+        raise KasBundleError(
+            f"could not download the KAS engine from {asset_downloader.redact_url(url)}: {why}"
+        ) from exc
     if len(body) > _MANIFEST_MAX_BYTES:
         raise KasBundleError(f"{asset_downloader.redact_url(url)} is too large to be a manifest")
     if sha256 is not None and hashlib.sha256(body).hexdigest() != sha256:
@@ -847,14 +850,21 @@ def install_pinned(
 ) -> InstalledKasBundle:
     """Install this release's pinned engine if it is not already there; return it.
 
-    The digest check runs on the manifest's bytes before anything is parsed or
-    fetched, so a host serving a different manifest under the pinned version's
-    name installs nothing.
+    A host that cannot run the engine (:class:`KasHostUnsupported`: no build for
+    its OS or architecture, or glibc below the floor) is refused before the
+    manifest is fetched, so the refusal names that cause even offline and a caller
+    that asks again costs no network round trip. The digest check runs on the
+    manifest's bytes before anything is parsed or fetched, so a host serving a
+    different manifest under the pinned version's name installs nothing.
     """
     root = root or kas_engines_root()
     present = installed_bundle(root=root, version=KAS_PIN_VERSION)
     if present is not None:
         return present
+    # The local host checks install_bundle repeats; none of them reads the network.
+    _require_loadable_glibc(None, None)
+    host_platform_key()
+    host_node_key()
     manifest, url = fetch_manifest(
         base_url, version=KAS_PIN_VERSION, sha256=KAS_PIN_MANIFEST_SHA256
     )

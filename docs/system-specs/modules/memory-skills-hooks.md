@@ -613,6 +613,28 @@ and it refuses only the long tail of values. Only consolidation is bound: owner
 edits, imports, the dashboard and lessons keep the byte ceiling alone
 ([Semantic Memory](#semantic-memory)).
 
+A refused value is carried to the same session's next pass instead:
+`_audit_oversized_semantic` also adds each one, whole, with its key and length, to
+the session's refused-value note, the `memory_meta` row
+`consolidation_refused_semantic:<session>` (`_update_refused_semantic_note`), under
+the same hold, so the note lands exactly when the audit row does; an entry already in
+the note is not added twice. The session's next consolidation prompt lists the note
+under `## Semantic Values Refused Last Pass`, after the semantic table and outside its
+cap, and asks the model to propose a fact that is still true again as separate keys
+within the bound. Each value has passed `validate_semantic` (the byte ceiling and the
+injection check), as every row the table shows has. Once that pass has written its
+answer, the entries it showed are dropped under a publication hold, so a value
+refused again unchanged is not listed again, while a shortened value still over the
+bound is a new entry; a pass that ends before its writes keeps the note. A note keeps
+at most `_MAX_REFUSED_SEMANTIC_NOTES` (5) values, newest kept, which bounds the
+section; a write that drops older values says so in one warning naming their count
+and keys. Each change deletes, in the same commit, every session's note left
+`_REFUSED_SEMANTIC_NOTE_DAYS` (30) days without a write, by the store's clock. That
+prune aside, only the session's own passes, which its lease runs one at a time, change
+its row, and only that session is shown it, so a refusal on a session's last pass is still never proposed again. A note
+that cannot be written is logged and skipped, its statement rolled back under the
+store lock so the pass goes on. There is no dashboard view of it.
+
 The prompt's `## Current Semantic Memory` block is bounded too, on BOTH passes
 (the preference-only pass builds the same block): the active table is read
 whole, in key-ordered pages of 500 (`_semantic_snapshot_in_pages`, keyset
@@ -3709,7 +3731,7 @@ Parses legacy markdown files into structured memory:
 - Idempotent: re-running skips existing semantic entries (conflict resolution), episodic dedup via FAISS when available
 
 **Automatic migration (`GatewayOrchestrator._auto_migrate_memory`)**: migration is fully automatic; there is no dashboard "Migrate" button. After the deferred memory initialization worker completes recovery and opens the readiness barrier, the gateway schedules a task retained in `_background_tasks` and cancelled on shutdown. It runs two idempotent phases with blocking work offloaded to the maintenance executor:
-1. **Migrate** (gated on `memory.migrated == False`): detects legacy content via the shared `memory.legacy_memory_present()` helper (also used by `/api/memory/stats`), runs `migrate_from_markdown()`, then flips `memory.migrated=True` for **everyone** — fresh installs with zero legacy entries included, so all users land in vector-only mode. Syncs the live `consolidator._migrated`, and **acknowledges** with a `migration` audit event (`memory_events`, visible in the dashboard Audit tab, `source="auto"`, counts in `new_value`) plus a `logger.info` line. On error: logs and leaves `migrated=False` so the next boot retries.
+1. **Migrate** (gated on `memory.migrated == False`): detects legacy content via the shared `memory.legacy_memory_present()` helper (also used by `/api/memory/stats`), runs `migrate_from_markdown()`, then flips `memory.migrated=True` for **everyone** — fresh installs with zero legacy entries included, so all users land in vector-only mode. Syncs the live `consolidator._migrated`, and **acknowledges** with a `migration` audit event (`memory_events`, written on the maintenance executor because it takes the store's writer lock, visible in the dashboard Audit tab, `source="auto"`, counts in `new_value`) plus a `logger.info` line. On error: logs and leaves `migrated=False` so the next boot retries.
 2. **Re-embed sweep** (independent of the migrated flag): awaits the background model download if one is still in flight (safe — we are our own task), then `VectorMemoryStore.backfill_missing_embeddings()` embeds any episodic rows written with a NULL vector and rebuilds the FAISS index. Self-healing across boots and across a download that failed then later succeeded.
    - **The sweep probes before it loads.** `wait_ready()` kicks the GGUF load, so asking the model to be ready is not a free question — it costs ~1GB of RSS for the process's lifetime (measured: `VmRSS` +1069 MiB, of which `RssAnon` +455 MiB is private KV/compute buffers and `RssFile` +614 MiB is the mmap'd weights). A steady-state boot has nothing to embed, so the sweep asks two **non-loading** questions first and returns 0 when both say no: `store.has_pending_embeddings()` (three `SELECT 1 … LIMIT 1` reads over the same predicates the three sub-sweeps use) and `store_embedding_space_is_stale(store)` (a signature comparison over `model_id`/`dim`, which are set when the backend is *constructed*). Only when there IS work does it wait on readiness, reconcile, and sweep — so a stale vector space still reconciles and re-embeds, and rows deferred with `defer_embedding=True` are still picked up on a later boot. The non-mutating probe is used deliberately rather than `reconcile_store_embedding_space()`, which is destructive and refuses to clear against an unready backend. A store that does not implement the probe keeps the old always-load behaviour rather than silently losing its sweep.
    - **The model still loads lazily on the first real embedding need.** `_start_embeddings()` binds `embed_fn`/`embed_fn_factory` without loading anything: `make_sync_embed_fn()` returns a closure, and the load is kicked inside `embed_batch()` the first time it finds `_llm is None` (returning `None` so that caller degrades to keyword search).

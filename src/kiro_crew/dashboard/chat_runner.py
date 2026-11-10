@@ -238,6 +238,7 @@ from kiro_crew.dashboard.chat_turn.session_reset import (
 )
 from kiro_crew.dashboard.chat_turn.slash_commands import (  # noqa: F401
     _answer_slash_without_channel,
+    _begin_compact_command,
     _forwards_harness_command,
     _turn_compact_command,
     _turn_slash_gate,
@@ -479,11 +480,14 @@ from kiro_crew.session_agent_selection import (  # noqa: F401
     restore_agent_selection,
     session_agent_selection_kind,
 )
+from kiro_crew.slack.code_channels.approval_picker import keep_card as keep_code_channel_card
 from kiro_crew.slack.code_channels.binding import mirror_post_thread as code_channel_post_thread
 from kiro_crew.slack.code_channels.binding import notify_turn_end as notify_code_channel_turn_end
 from kiro_crew.slack.code_channels.binding import (
     notify_turn_start as notify_code_channel_turn_start,
 )
+from kiro_crew.slack.code_channels.worker_approvals import finish as finish_worker_approval
+from kiro_crew.slack.code_channels.worker_approvals import start as start_worker_approval_relay
 from kiro_crew.slack.handler import post_linked_approval
 from kiro_crew.start_priority import StartPriority
 from kiro_crew.trust_patterns import (  # noqa: F401 -- compatibility re-export
@@ -1108,6 +1112,8 @@ async def _run_chat(
         if _agent_started:
             event_stream = turn._agent_turn_stream = client.stream_unsolicited()
         elif is_slash:
+            if turn.first_word == "/compact":
+                _begin_compact_command(turn)
             event_stream = client.stream_command(message)
         else:
             event_stream = client.stream(_segment_user_span(turn, full_message))

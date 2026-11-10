@@ -93,11 +93,12 @@ export const opensDisplayTurn = (msg: ChatMessage): boolean =>
  * A steer the turn never took, whose own queued turn has since written a fresh
  * row with the same text (`steerState: 'superseded'`, see `chat_delivery.py`).
  * The row stays in the transcript for history; drawing it would show the
- * message twice.
+ * message twice. A `user` row is a person's or a peer's steer, and a `nudge`
+ * row is an automation steer (a work-ledger wake).
  */
 export function isSupersededSteerRow(m: ChatMessage): boolean {
   const meta = m.meta as { steer?: unknown; steerState?: unknown } | undefined
-  return m.role === 'user' && meta?.steer === true && meta.steerState === 'superseded'
+  return (m.role === 'user' || m.role === 'nudge') && meta?.steer === true && meta.steerState === 'superseded'
 }
 
 /**
@@ -106,14 +107,16 @@ export function isSupersededSteerRow(m: ChatMessage): boolean {
  *
  * The server names the successor by `meta.supersededBy` (its `mid`,
  * `superseded_steer._retire_superseded_steer_row`). An ID match also requires a
- * non-steer `user` row with the same text. A caller can supply `mid`, and a
- * fork can copy `supersededBy`. These checks prevent an unrelated row from
- * replacing the copied steer. Rows that fail the checks do not stop the scan.
+ * non-steer row with the superseded row's own role and the same text. A caller
+ * can supply `mid`, and a fork can copy `supersededBy`. These checks prevent an
+ * unrelated row from replacing the copied steer: a `user` row never takes a
+ * `nudge` steer's place, and a `nudge` row never takes a `user` steer's place.
+ * Rows that fail the checks do not stop the scan.
  *
- * In a live tab the successor is the row `queue_pop` rebuilt. It has no `mid`
- * until a refresh, so the fallback is the first later non-steer `user` row
- * with no `mid` and the same text. The server supersedes a row only when the
- * drained text equals it.
+ * In a live tab the successor of a `user` steer is the row `queue_pop`
+ * rebuilt. It has no `mid` until a refresh, so the fallback is the first later
+ * non-steer row with the same role, no `mid` and the same text. The server
+ * supersedes a row only when the drained text equals it.
  */
 export function supersededSuccessorIdx(messages: ChatMessage[], idx: number): number {
   const row = messages[idx]
@@ -123,12 +126,12 @@ export function supersededSuccessorIdx(messages: ChatMessage[], idx: number): nu
   for (let i = idx + 1; i < messages.length; i++) {
     const m = messages[i]
     const meta = m.meta as Record<string, unknown> | undefined
-    if (m.role === 'user' && !meta?.steer && meta?.mid === next && m.content === row.content) return i
+    if (m.role === row.role && !meta?.steer && meta?.mid === next && m.content === row.content) return i
   }
   for (let i = idx + 1; i < messages.length; i++) {
     const m = messages[i]
     const meta = m.meta as Record<string, unknown> | undefined
-    if (m.role === 'user' && !meta?.steer && !meta?.mid && m.content === row.content) return i
+    if (m.role === row.role && !meta?.steer && !meta?.mid && m.content === row.content) return i
   }
   return -1
 }
@@ -256,12 +259,13 @@ function answerEndIndex(items: readonly TurnItem[]): number {
  * repeats it, which nothing does. An `mcp_app` row (an embedded MCP App's
  * ui/message delivery) is here for the same reason: the user's own click
  * landed it, and nothing in the fold repeats it. A `workflow` follow-up is the
- * same again: its answer is about a workflow run, not the fan-out.
+ * same again: its answer is about a workflow run, not the fan-out; and so is a
+ * `heartbeat` prompt, whose answer is about the heartbeat task.
  *
  * `recovery` is deliberately NOT here: a tool-stall recovery inside a fan-out is
  * a continuation of the very work being folded.
  */
-const FOREIGN_INJECT_KINDS = new Set(['cron', 'user_replay', 'mcp_app', 'workflow'])
+const FOREIGN_INJECT_KINDS = new Set(['cron', 'user_replay', 'mcp_app', 'workflow', 'heartbeat'])
 const isForeignInjection = (msg: ChatMessage): boolean => {
   if (msg.role !== 'inject') return false
   if (isNoteRow(msg)) return true

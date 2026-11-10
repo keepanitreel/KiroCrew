@@ -226,6 +226,7 @@ class AcpSessionHandle:
     _refuse_unidentifiable_mcp_approval = _sh_permissions._refuse_unidentifiable_mcp_approval
     _refuse_unreadable_mcp_identity = _sh_permissions._refuse_unreadable_mcp_identity
     _refuse_unretained_provenance = _sh_permissions._refuse_unretained_provenance
+    _reject_with_host_notice = _sh_permissions._reject_with_host_notice
     _audit_handle_reject = _sh_permissions._audit_handle_reject
     apply_session_permission_routing = _sh_permissions.apply_session_permission_routing
     _build_permission_event = _sh_permissions._build_permission_event
@@ -690,6 +691,10 @@ class AcpSessionHandle:
         # their permission requests itself, after the deny floor, the
         # sensitive-path check and the governance ceiling. Empty with no batch.
         self.kas_crew_answered: frozenset[str] = frozenset()
+        # The ``@server/tool`` grants a PreToolUse hook kept at ``ask``
+        # (``kas_hook_coverage.projected_hook_held``): answered the same way, but
+        # only on a surface that fires the hooks. Empty with no batch.
+        self.kas_hook_held: frozenset[str] = frozenset()
         # The agent's `toolsSettings.shell.allowedCommands` as the gate matches
         # them (``kas_permissions.crew_answered_commands``), answered the same way.
         self.kas_crew_answered_commands: tuple[str, ...] = ()

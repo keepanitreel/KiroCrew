@@ -92,7 +92,7 @@ legacy metadata do not override a canonical execution.
 | `messaging/privacy_mode.py` | The `!temporary` / `!incognito` session privacy modes, keyed by **session key** — two bounded LRUs, the durable `SessionMap` flag, one `is_restricted` predicate, the token strippers, and the SEL audit with the channel as a parameter. See [Session privacy modes](#session-privacy-modes-privacy_modepy) |
 | `messaging/auto_title.py` | Conversation auto-titling — the claim-early LRU, the tool-free bounded background turn, the prompt, and the title-cleaning rules. Renaming the platform conversation is a caller-supplied callback. See [Auto-titling](#auto-titling-auto_titlepy) |
 | `messaging/upload_gate.py` | `session_is_restricted(dashboard_state, session_key, persisted_probe=, unknown_denies=True)` — the shared incognito/temporary decision, `session_blocks_reads(...)` — its READ counterpart (only `temporary` blocks reads; `incognito` still reads), plus `uploads_restricted(...)` which adds the per-channel upload audit, plus `live_dashboard_slot`. Three-state ladder (non-`dashboard:` key answers off `privacy_mode`, a LIVE slot answers off `is_restricted`/`blocks_reads`, otherwise the PERSISTED transcript mode answers). `unknown_denies` decides an unreadable mode: uploads DENY it outright (bytes cannot be recalled), while the durable-history gate denies only when a transcript EXISTS but its mode cannot be resolved (an ambiguous stem, a header no normal session wrote) — that is where an incognito session can hide. A legacy header with no `memory_mode` reads `persistent` rather than unknown, so the only unknown history allows is a truly ABSENT record, where nothing on disk claims the session is restricted. Discord and Telegram both route uploads here; both resumed-turn paths also use it to gate live projection and durable history, and Telegram uses it for `/title` |
-| `messaging/session_trust.py` | The per-session tool-Trust grant store: `is_session_trusted`, `add_trusted_session(key, sessions=, strict=)`, `clear_trusted_sessions`. In memory only, so an ad-hoc auto-approve grant dies with the process. The grant has TWO halves and both are load-bearing: the in-memory mapping the driver reads, and the session's approval policy set to `auto`, because a spawned subagent reads its parent's policy and never this mapping. So it is a `key -> SessionManager` MAPPING rather than a set, which is what lets `clear_trusted_sessions` undo the policy half too (back to `""`, the same value the dashboard's untrust toggle writes) without its caller having to hand a manager back. **Every mutation goes through the API**: reaching the container directly is how a revoke came to drop one half and leave subagents trusted, and a mapping has no `.add`, so a half-grant is not expressible either. `strict=True` is for a caller that reports the grant back to the person who clicked (the Slack linked-approval Trust button): a failing policy write undoes the in-memory half and raises, so a PARTIAL grant is never labelled "Trusted"; the default stays best-effort for callers with nobody to tell. Named `session_trust`, not `trust`, so it cannot be confused with a connection-admission roster: this grant is about what ONE session's tools may skip, not about which principals may attach. Consumed only through `TurnDriver`'s `auto_approve_session` predicate, which runs BEHIND the keystone, governance and deny-list gates, so a hard DENY still refuses |
+| `messaging/session_trust.py` | The per-session tool-Trust grant store: `is_session_trusted`, `add_trusted_session(key, sessions=, strict=)`, `clear_trusted_sessions`. In memory only, so an ad-hoc auto-approve grant dies with the process. The grant has TWO halves and both are load-bearing: the in-memory mapping the driver reads, and the session's approval policy set to `auto`, because a spawned subagent reads its parent's policy and never this mapping. So it is a `key -> SessionManager` MAPPING rather than a set, which is what lets `clear_trusted_sessions` undo the policy half too (back to `""`, the same value the dashboard's untrust toggle writes) without its caller having to hand a manager back. **Every mutation goes through the API**: reaching the container directly is how a revoke came to drop one half and leave subagents trusted, and a mapping has no `.add`, so a half-grant is not expressible either. `strict=True` is for a caller that reports the grant back to the person who clicked (the Slack linked-approval Trust button, and the Telegram Trust button, whose failed grant replies "Approved" and audits `error`): a failing policy write undoes the in-memory half and raises, so a PARTIAL grant is never labelled "Trusted"; the default stays best-effort for callers with nobody to tell. Named `session_trust`, not `trust`, so it cannot be confused with a connection-admission roster: this grant is about what ONE session's tools may skip, not about which principals may attach. Consumed only through `TurnDriver`'s `auto_approve_session` predicate, which runs BEHIND the keystone, governance and deny-list gates, so a hard DENY still refuses |
 | `messaging/spawn_approval_delivery.py` | The channel-neutral spawn-approval delivery seam: a process-global registry (`register_channel_delivery` / `unregister_channel_delivery` / `resolve_channel_delivery` / `deliver_spawn_approval` / `unpressed_wait_answer` / `clear_channel_delivery_hooks`) keyed by channel namespace. The single host-wide `on_spawn_approval` callback (`slack/gateway_runtime/subagent_wiring.py`) consults `deliver_spawn_approval` FIRST so a spawn parented on a live channel conversation is answered where the human already is, on that channel's own Approve/Deny/Trust keyboard. A hook returns `True`/`False` (the user's decision, used verbatim) or `None` (no hook for this channel, or it could not surface the prompt) to fall through to the Slack-DM/dashboard gate. Same inversion `session_trust` uses — `messaging` may not import a channel package, so the hook is a plain async callable the channel supplies. In memory only (a hook is a live object on a running dispatcher; the registry dies with the process and a channel re-registers on startup). See [Channel-neutral spawn-approval delivery](#channel-neutral-spawn-approval-delivery-spawn_approval_deliverypy) |
 | `messaging/link.py` | **Layer 3** — session-key namespacing (`session_key`/`canonical_key`/`legacy_key`/`is_legacy_slack_key`) + `ChannelLink` + DM-scope key derivation / `should_rotate_generation`, plus the in-channel `/link` ⇄ `/unlink` pair (`rebind_conversation_location` / `release_conversation_location`) |
 | `messaging/conversation.py` | `ConversationState` — per-conversation rotating *generation* bookkeeping (advanced by `/new` and idle/daily reset), seeded from the persisted session map |
@@ -487,7 +487,7 @@ is the point — a channel-local store would have had to reimplement every one o
 
 **Deny-on-silence can be SPOKEN.** `open_approval(..., on_timeout=…)` takes an optional coroutine that `PendingApproval.wait` awaits when the window closes, before it returns `DENY`, so the channel can resolve the prompt still sitting on the user's screen: `approval.TIMEOUT_NOTICE` is the text. Without it the refusal is invisible: the turn moves on and a live-looking prompt remains, which a later `1` can no longer answer (it finds no open entry and gets `RECEIPT_EXPIRED`). It is a callback rather than a transport because this module never learns what a channel is, and only the renderer that posted the prompt knows which message to edit. It must not raise: the verdict is already `DENY`, and `_announce_timeout` logs and swallows anything but cancellation, because a notice that could not be posted must never become an approval. WhatsApp is the first channel wired onto it.
 
-**The dashboard composer answers the same prompts for a web chat slot.** `useToolApproval` (`website/src/components/chat-input/approval.ts`) owns the decision its approval bar submits: a trust verb goes to the slot-scoped `api.approveChatSlot` only when the composer has a slot; from an unattended source (`UNATTENDED_APPROVAL_SOURCES`: cron, heartbeat, taskrunner), whose Trust controls are withheld, it is deliberately downgraded to a one-shot `approve` on `api.resolveApproval`; every other decision goes to `api.resolveApproval` through the shared fail-closed `toApiDecision` mapping (`website/src/utils/approvalDecision.ts`), which sends any verb that endpoint cannot honor as `reject`. `website/src/components/ChatInput.tsx` renders the bar, and `SpawnApprovalCard.tsx` beside the hook renders the slot's pending sub-agent spawns. `ChatInput.approval.test.tsx` and `ChatInput.trustOneShot.test.tsx` pin the routing.
+**The dashboard composer answers the same prompts for a web chat slot.** `useToolApproval` (`website/src/components/chat-input/approval.ts`) owns the decision its approval bar submits: a trust verb goes to the slot-scoped `api.approveChatSlot` only when the composer has a slot; from an unattended source (`UNATTENDED_APPROVAL_SOURCES`: cron, heartbeat, taskrunner), whose Trust controls are withheld, it is deliberately downgraded to a one-shot `approve` on `api.decideApproval`; every other decision goes to `api.decideApproval` (bound to the card's owner-bound target, see `website/src/types/approvalTarget.ts`) through the shared fail-closed `toApiDecision` mapping (`website/src/utils/approvalDecision.ts`), which sends any verb that endpoint cannot honor as `reject`. `website/src/components/ChatInput.tsx` renders the bar, and `SpawnApprovalCard.tsx` beside the hook renders the slot's pending sub-agent spawns. `ChatInput.approval.test.tsx` and `ChatInput.trustOneShot.test.tsx` pin the routing.
 
 ### Channel-neutral spawn-approval delivery (`spawn_approval_delivery.py`)
 
@@ -1251,7 +1251,11 @@ channel; a cron whose origin is the dashboard, or which has no origin at all, ha
 no link for it to ride. `session="<channel>"` needs no link — it resolves the
 destination from the transport's own `configured_targets()` through
 `_deliver_channel_dm` — which is what makes it the route for a proactive notice
-raised somewhere other than the channel itself.
+raised somewhere other than the channel itself. Its optional `posted` list receives
+`(conversation id, message id)` for each confirmed part; the notification bridge
+uses it to link a pending-approval note to the approval a Telegram reply answers
+(app-notifications, phase B4d), and a Telegram message carries the quoted
+message's id as `TelegramInboundMessage.reply_to_message_id`.
 
 **A proactive channel send names its sender.** Every session and cron can reach
 the same owner DM, so `_deliver_send_message_fallback` ends the text with one line,
@@ -3789,7 +3793,7 @@ The extraction is gated by a **golden-transcript** harness (`test/test_slack_gol
 
 ## Slack settings API
 
-Three dashboard-only endpoints back the `/settings/channels/slack` panel (legacy `?tab=channels&channel=slack` and `?tab=slack` links redirect there). They are
+Four dashboard-only endpoints back the `/settings/channels/slack` panel (legacy `?tab=channels&channel=slack` and `?tab=slack` links redirect there). They are
 registered in the dashboard route block (NOT `_register_mcp_routes`, which is
 also mounted on the token-less API-only server) so they always sit behind
 dashboard token auth.
@@ -3806,12 +3810,103 @@ dashboard token auth.
   rejection returns 400 and writes nothing, network failure saves with
   `verify_warning`. `<field>_clear` must be a strict boolean. Secrets land in
   `config_dir/.env` via atomic 0600 `mkstemp` + `os.replace`, and
-  `os.environ` is synced afterward. Response `restart_required` is true for
-  actual env changes and for `command`, the one Slack config field a running
-  gateway cannot apply (the slash command is registered with the app manifest);
-  every other field applies live, including `allowed_enterprise_ids`, which is
-  re-read through the validated `enterprise.reload_allowed_team_ids`.
+  `os.environ` is synced afterward. Response `reconnect_required` is true for
+  actual token changes, and for a first owner ID on a gateway that has none
+  (`DashboardState.owner_id` empty), which `POST /api/slack/reconnect` applies;
+  `restart_required` is true for a change to the owner the gateway already
+  authorizes (Reconnect never replaces that owner in place) and for `command`, the one Slack config field a running
+  gateway cannot apply (the slash command is registered with the app manifest). Every other field applies live, including
+  `allowed_enterprise_ids`, which is re-read through the validated
+  `enterprise.reload_allowed_team_ids`.
   An empty `command` resets the slash command to the default.
+- `POST /api/slack/reconnect` — direct-local only, like the PUT (remote 403
+  `remote_read_only`). Runs `slack.reconnect.reconnect_slack`: reads the
+  credential store under the dashboard config lock (unreadable, or a Slack
+  credential whose raw value, environment first then `.env`, is a
+  `secret://` reference the vault did not resolve → 500
+  `credential_store_unreadable`, connection untouched), refuses a saved owner
+  ID that differs from the one the gateway authorizes (`connect_error:
+  owner_change_needs_restart`, connection left up: every queued, held or
+  running Slack message was admitted under that owner; a gateway with no owner
+  yet takes the saved one), closes the current
+  socket client and unpublishes its Web API client, hoists the tokens and
+  owner (also `DashboardState.owner_id` and the handler owner allowlist),
+  recomputes `_slack_enabled`, then re-awaits `init_socket_mode` +
+  `_connect_slack` on the gateway loop with the boot `SeenCache` (the
+  enterprise re-validation keeps an armed workspace allowlist in force while
+  its `auth.test` runs: `enterprise._revalidation_hold`; an allowlist reload
+  waits for it on `enterprise._state_lock`, then reads the file), skipping the
+  start-up declared YOLO grant (`init_socket_mode(..., declared_yolo=False)`)
+  so an owner's `!yolo off` survives a reconnect. The Web API
+  client is published (`orch.slack` and the dashboard) only behind a
+  connected socket, after the workspace gate and the channels policy admit it.
+  Answers `{connected, connect_error}`; the declines are `tokens_missing`,
+  `owner_id_missing`, `enterprise_validation_failed`, `denied_by_policy` and
+  `workspace_switch_needs_restart`, Slack API codes (`invalid_auth`) pass
+  through. A reconnect never switches workspaces: whenever boot published a
+  Web API client it pins that client's `auth.test` team (boot publishes it
+  whether or not the socket connects; a boot with a bot token but no app
+  token publishes none and pins nothing; a boot token Slack rejects as
+  never authenticated (`invalid_auth`, `not_authed`) releases the pin only
+  when no Slack work was admitted: no connected socket and no queued, held or
+  running turn; a revoked or expired token keeps it), and a connected reconnect pins its
+  own. The workspace gate runs before the current socket is closed
+  (`reconnect._check_workspace`): a saved bot token whose team differs from
+  a KNOWN pinned team is refused with `workspace_switch_needs_restart` and
+  the working connection is left up (so the answer can carry `connected:
+  true` beside that error; the panel and the `slack.reconnect` access log
+  read the error first), because queued and in-flight work
+  names the former workspace's channels. A pin whose team the boot probe
+  could not confirm is named first, by the same saved token or by asking
+  the boot token again. A workspace is named by its `team_id`; an org-wide
+  Enterprise Grid install, whose `auth.test` has no `team_id` and says
+  `is_enterprise_install`, is named by its `enterprise_id` instead, so a
+  switch between the org and one of its workspaces is still refused. The
+  pinned token is kept apart from the live one
+  (`_slack_pin_token`), so a save that clears or replaces the bot token in
+  between cannot erase it; a connected reconnect makes its own token the
+  pin's. While it stays unnamed, only the pinned token itself
+  reconnects (so a transient boot probe failure cannot lock Reconnect out);
+  any other token is refused before the teardown, since it might belong to
+  another workspace. So is another token whose own probe fails: that attempt
+  answers Slack's error (`invalid_auth`, a timeout) with the working
+  connection left up. A connected reconnect also
+  attaches the agent-session driver to its new client
+  (`agent_sessions.status.configure`), as boot does. While a reconnect runs with no client
+  published, the Slack queue drains and the inbound route keep their entries
+  queued rather than dispatch them into the cleared client, and a connected
+  reconnect starts them again; an inbound message with attachments waits for
+  the attempt and is fetched with the client it publishes. A code-channel
+  message has no held queue: its gate and its dispatch read the channel,
+  post, bind and route with the client the route started with
+  (`code_channels.routing.inbound_gate` / `dispatch`, `slack=`), so a
+  reconnect starting mid-route cannot drop it. One that arrives with no
+  client waits for the attempt before the gate, and in a bound code channel
+  a failed attempt sends the undelivered notice for an admitted sender (anyone
+  else's message goes on to the gate, which refuses it); a `!stop` there
+  needs no client and still stops the bound session, under the Stop button's
+  own rules, in a thread too (`code_channels.routing.stop_from_channel`). When that attempt
+  fails, nothing can fetch the files, so the message is not delivered
+  without them: the owner gets the undelivered notice described below at
+  once (`events_queue.notify_slack_undelivered`). A background result bound
+  for Slack (`_deliver_result`) waits for the attempt the same way and posts
+  with the client it publishes; when it fails, a Slack-only (`slack`) result
+  is kept as a dashboard notification rather than dropped. A reconnect that
+  retires a published client and fails keeps that hold for the next
+  reconnect (the retry) for `HELD_WORK_GIVE_UP_SECS` (300 s); when that
+  window ends with no client, each held message leaves its queue and the
+  owner gets one dashboard notification naming the channel in words (a
+  tracked channel's saved name, "a direct message", else "a Slack
+  channel") and quoting the first 80 characters of the message, or saying
+  it was a voice memo or an attachment; Slack ids stay in its `meta`
+  (`events_queue.give_up_held_slack_work`), and the hold is released. A
+  gateway no reconnect took a client from handles a missing client as it
+  always has. Concurrent
+  callers share one attempt; a caller that goes away does not cancel it. 503
+  `slack_reconnect_unavailable` on a server with no socket owner, and until
+  boot's own `init_socket_mode` + `_connect_slack` have returned (the gateway
+  publishes `DashboardState.slack_reconnect` only then, so a reconnect never
+  opens a socket boot would replace without closing).
 - `GET /api/slack/manifest` — public manifest template rendered with
   `?alias=` (default `kirocrew`, never `$USER`) plus Slack's one-click
   create deep link and `command`, the slash command that manifest registers
@@ -4689,7 +4784,11 @@ Slack settings API they are registered in the dashboard route block (NOT
   consecutive `getUpdates` failures flip it false with a reason, the next
   success flips it back), `connect_error` (token-free short reason:
   `TelegramAuthError` message for a rejected token, exception class name
-  otherwise), `read_only` (true unless the request is direct-local), and
+  otherwise; for a polling failure, the exception class name for a
+  network failure, the HTTP status for a reply that is not a Bot API
+  reply (not JSON, empty, or JSON without `ok`), and "check the bot
+  token" for the Bot API's own `ok:false`),
+  `read_only` (true unless the request is direct-local), and
   `configured` (token AND enabled AND non-empty allowlist — the transport
   fails closed and rejects every message while the allowlist is empty).
   Never returns a raw secret. Token presence considers both the

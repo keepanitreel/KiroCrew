@@ -11,6 +11,7 @@ just before it runs (``admission.installed_content_refusal``).
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import hmac
 import json
@@ -25,6 +26,7 @@ from kiro_crew.apps import admission
 from kiro_crew.apps import manifest as manifest_module
 from kiro_crew.apps.admission import AppAdmissionPolicy, _signature_valid, app_admission_denied
 from kiro_crew.apps.manifest import AppManifest
+from kiro_crew.testing.links import make_dir_link
 
 # The names under test are bound at import but resolved when a test runs, so a
 # tree without them fails each test where it calls them, not at collection.
@@ -128,16 +130,27 @@ class TestPackagedInventory:
         _write(root, "ui/data/strings.json", "{}")
         assert "ui/data/strings.json" in packaged_inventory(root)
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink")
     @pytest.mark.parametrize("kind", ["file", "dir"])
     def test_a_link_is_refused(self, tmp_path: Path, kind: str) -> None:
         root = _app(tmp_path / "a")
         target = tmp_path / ("outside.py" if kind == "file" else "outside")
+        link = root / "backend" / "helper"
         if kind == "file":
-            target.write_text("evil")
+            target.write_text("evil", encoding="utf-8")
+            try:
+                link.symlink_to(target)
+            except NotImplementedError:
+                pytest.skip("file symlinks are unsupported")
+            except OSError as exc:
+                if (
+                    exc.errno in {errno.ENOSYS, errno.ENOTSUP}
+                    or getattr(exc, "winerror", None) == 1314
+                ):
+                    pytest.skip("file symlinks are unsupported or need unavailable privilege")
+                raise
         else:
             target.mkdir()
-        os.symlink(target, root / "backend" / "helper")
+            make_dir_link(link, target)
         with pytest.raises(InventoryError, match="is a link"):
             packaged_inventory(root)
 
@@ -528,10 +541,8 @@ def test_kirocrew_app_sign_writes_a_signature_admission_accepts(
 def test_kirocrew_app_sign_refuses_a_tree_with_a_link(tmp_path: Path) -> None:
     from kiro_crew.cli_commands_app import _handle_app_sign
 
-    if not hasattr(os, "symlink") or sys.platform == "win32":
-        pytest.skip("POSIX symlink")
     root = _app(tmp_path / "src")
-    os.symlink(tmp_path, root / "ui" / "escape")
+    make_dir_link(root / "ui" / "escape", tmp_path)
     key = tmp_path / "key"
     key.write_text(SECRET)
     with pytest.raises(SystemExit):

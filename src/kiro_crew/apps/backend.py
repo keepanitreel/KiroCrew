@@ -996,7 +996,15 @@ def _start_app_backend_body(app_name: str, manifest: Any) -> AppProcess | None:
 
                 npm_cmd = [npm_bin, "install", "--production", "--no-audit", "--no-fund"]
                 if signed_tree_applies(app_name, entry):
-                    npm_cmd.append("--no-package-lock")
+                    # Provisioning preserves signed files. A publisher lockfile is
+                    # honoured with ``npm ci``, which installs its exact pins and
+                    # integrity and fails rather than rewrite it; without one the
+                    # install still runs, but records no lockfile of its own.
+                    locks = ("npm-shrinkwrap.json", "package-lock.json")
+                    if any((pkg_dir / n).is_file() for n in locks):
+                        npm_cmd[1] = "ci"
+                    else:
+                        npm_cmd.append("--no-package-lock")
                 sandboxed_npm, _ = wrap_argv(npm_cmd, mode="standard")
                 sandboxed_npm = cgroup_scope_argv(sandboxed_npm)  # cgroup DoS ceiling
                 npm_run = run_limited(

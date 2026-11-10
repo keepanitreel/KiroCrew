@@ -638,12 +638,20 @@ def _init_task_runner(self: GatewayOrchestrator) -> None:
             return False
         clean_title, _ = redact_exfiltration_urls(task.title or "")
         clean_title, _ = redact_credentials(clean_title)
+        # The record names the run this gate holds as well as its task:
+        # up to three runs execute at once and their task indexes
+        # overlap, so the index alone cannot say whose gate it is. A
+        # project page reads both fields from the listing and decides
+        # each gate by the record's instance; the id is opaque. The
+        # executor sets the task's run before it awaits this callback.
         approval_id = f"task-gate-{task.index}-{uuid.uuid4().hex[:8]}"
         result = await self.dashboard_state.request_approval(
             approval_id=approval_id,
             source="taskrunner",
             tool=f"Task {task.index}: {clean_title}",
             tool_purpose="Task requires manual approval before execution",
+            run_task_id=task.run_task_id,
+            task_index=task.index,
         )
         sel().log_api_access(
             caller="taskrunner",
@@ -958,6 +966,8 @@ async def run(self: GatewayOrchestrator) -> None:
     await cautious_boot.initialize()
 
     seen = SeenCache()
+    # Kept for a Slack reconnect, so a rebuilt socket still drops redeliveries.
+    self._slack_seen = seen
     await self._init_services()
 
     # Wire in-process embeddings (always-on) and kick background model download
@@ -1598,6 +1608,26 @@ async def run(self: GatewayOrchestrator) -> None:
     if self.dashboard_state:
         self.dashboard_state.slack_socket_connected = connected
         self.dashboard_state.slack_connect_error = getattr(self, "_slack_connect_error", "")
+    # Pin the workspace of the Web API client boot published (none published,
+    # nothing pinned), so a later reconnect refuses to switch workspaces in
+    # place; the probe names the workspace, or releases the pin when Slack
+    # proves the token belongs to none. Fire-and-forget like the probe below:
+    # boot latency is unaffected.
+    from kiro_crew.slack.reconnect import pin_boot_workspace
+
+    _workspace_task = pin_boot_workspace(self)
+    if _workspace_task is not None:
+        self._background_tasks.add(_workspace_task)
+        _workspace_task.add_done_callback(self._background_tasks.discard)
+    if self.dashboard_state and not self._no_dashboard:
+        # POST /api/slack/reconnect calls this. Published only once boot's own
+        # Slack bring-up has returned, so a reconnect never builds a socket
+        # that boot's init_socket_mode then replaces without closing; until
+        # then the route answers 503 slack_reconnect_unavailable. The
+        # API-only server leaves it None.
+        from kiro_crew.slack.reconnect import reconnect_slack
+
+        self.dashboard_state.slack_reconnect = lambda: reconnect_slack(self)
 
     # Deferred tracked-channel capability probe (fire-and-forget, never
     # awaited — boot latency is unaffected). A Slack install created before

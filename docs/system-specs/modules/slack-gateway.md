@@ -233,6 +233,7 @@ Slack Socket Mode → events.py (dispatch) → handler.py → SessionManager →
 | `slack/interactions.py` | Block Kit button routing — tool approval, OPTIONS choices, cron/subagent ack, session resume, track channel approve/deny. The import path and patch surface of the `interactions_*` owners beside it; see [Event and interaction owners](#event-and-interaction-owners) |
 | `slack/blocks.py` | Reusable Block Kit dict builders for slash command UIs (session list). Action IDs: `mc_<command>_<action>[_<id>]` |
 | `slack/allowlist.py` | Tracking-channel allowlist prompts (`prompt_allowlist`, `prompt_track_channel`) + config persistence (`persist_allowed_user`, `persist_tracking_channel`) |
+| `slack/reconnect.py` | `reconnect_slack` — `POST /api/slack/reconnect`'s in-place Slack handshake from the saved credentials, the workspace pin that keeps it from switching workspaces, and the hold on Slack work while it runs (see messaging.md, Slack settings API) |
 | `slack/scope_probe.py` | Tracked-channel history-readability probe (`warn_unreadable_tracked_channels`) — warns when the installed token cannot read a tracked channel (e.g. a private channel on an install predating `groups:history`) |
 | `slack/enterprise.py` | Enterprise Grid workspace validation — `validate_enterprise()` (startup auth.test + cache) + `check_message_origin()` (per-message team_id check). SEL audit on all outcomes |
 | `slack/team_ids.py` | Channel → Slack workspace (`T…`/`E…`) for the agent child env (`KIROCREW_SLACK_TEAM_ID`, see acp-client "Conversation identity on the child env"). Reads `RealSlackClient._channel_team`, the store that routes outbound calls, which the client registers with `use_channel_team_store` when built; no second copy and no fallback. Imports nothing Slack-specific so the ACP spawn path can read it |
@@ -505,7 +506,7 @@ Agent submission, which `init()` registers.
 | Owner | Responsibility |
 |---|---|
 | `slack/events_block_text.py` | Text recovered from a message's Block Kit blocks and attachments: rich text, sections, tables, forwarded messages, a trusted bot's attachments |
-| `slack/events_queue.py` | The session queue around a running turn: queue tags, `!stop` holds (`slack_stop_in_flight`), the drain and `_dispatch_queued` |
+| `slack/events_queue.py` | The session queue around a running turn: queue tags, `!stop` holds (`slack_stop_in_flight`), the drain and `_dispatch_queued`, and the hold across a reconnect (`hold_if_slack_down`, `resume_held_slack_drains`, `give_up_held_slack_work`) |
 | `slack/events_slash.py` | `/kirocrew` and its sub-commands: `SLASH_REGISTRY`, the handlers, `_handle_slash` |
 | `slack/events_home_tab.py` | The App Home tab (`_publish_home_tab`) |
 | `slack/events_voice.py` | Voice memo download, transcription and the no-words note |
@@ -515,7 +516,7 @@ Agent submission, which `init()` registers.
 | `slack/interactions_settings.py` | Channels modal, user and channel pickers, default-agent selector, allowlist and track-channel approvals |
 | `slack/interactions_options.py` | OPTIONS controls, `action::` buttons, the thread-to-dashboard import |
 | `slack/interactions_sessions.py` | Stop, resume, end and new-session buttons |
-| `slack/interactions_approvals.py` | Native tool-approval buttons and review-mode drafts |
+| `slack/interactions_approvals.py` | Native tool-approval buttons, review-mode drafts, and the bridged-action press (`bridge_action_*`, the Approve and Deny on a bridged pending approval, behind the `bridge_approvals` preview; see app-notifications) |
 
 `interactions.py` keeps `init`, `dispatch` and `_handle_resume_choice` (with its lock table
 and closed-tab notice): the choice's session-file lookup is a stat inside an `async def`
@@ -1248,7 +1249,7 @@ Available to all allowed users.
 - Requires `channels:read` scope (for public channels) and `groups:read` (for private)
 - A user joining a monitored channel prompts nothing: multi-user access is disabled, so there is no allowlist prompt to send
 - If `tracking_channels` is empty, no monitoring occurs
-- Tracked channels are capability-probed (`slack/scope_probe.py`, one `conversations.history` call with `limit=1`) after the socket connects at startup and whenever a channel is added to tracking. A `missing_scope`/`channel_not_found` result logs a warning and pushes a dashboard notification — a private channel tracked under an install predating `groups:history` would otherwise fail silently. Deferred (`asyncio.create_task`), best-effort: transient network errors report nothing
+- Tracked channels are capability-probed (`slack/scope_probe.py`, one `conversations.history` call with `limit=1`) after the socket connects at startup or on a reconnect, and whenever a channel is added to tracking. A `missing_scope`/`channel_not_found` result logs a warning and pushes a dashboard notification — a private channel tracked under an install predating `groups:history` would otherwise fail silently. Deferred (`asyncio.create_task`), best-effort: transient network errors report nothing
 - `/<command> @user` refuses for the same reason
 - `/<command> #channel` adds a tracking channel via owner approval
 - An agent reads a tracked channel's recent messages, or one thread's, with the `read_slack_history` MCP tool (`POST /api/slack-history`, `RealSlackClient.fetch_history`). A channel that is untracked, that the inbound gate's channels policy refuses, or whose home workspace the origin gate (`slack.allowed_enterprise_ids`) does not admit is refused, as is a caller whose own `channels` governance scope leaves out `slack`; the home workspace is looked up again on every read until it resolves, so one failed lookup does not refuse every later read. Bot posts are dropped before the limit applies, `oldest` keeps only later messages (a thread's parent included), and text comes back only for the owner's messages: anyone else's is listed with `admitted: false` and no text, so the read admits no sender the inbound gate refuses
@@ -1497,7 +1498,7 @@ A channel-neutral dispatch path that replaces the native `handle_message` stream
 
 1. ACP sends `permission_request` event during streaming
 2. `events_queue.py:_resolve_approval_mode()` evaluates runtime YOLO, then the CLI `--approval` override, then `agent.approval_mode`; only `auto` yields `APPROVAL_AUTO`, otherwise it yields `APPROVAL_INTERACTIVE`. The unset `agent.approval_mode` is `auto` (`AgentConfig`), so that is the default; the flag replaces it, and each of its values (`reads`, `yolo`, `interactive`) yields `APPROVAL_INTERACTIVE` here, so a Slack channel turn under `reads` or `yolo` asks as under `interactive`; those two auto-approve on the background approval path (`slack/gateway_runtime/turn_approvals.py`). Native and transport dispatch both use this chokepoint, preventing an operator policy from being silently bypassed.
-3. Handler posts a Block Kit message with ✅ Approve / 🤝 Trust session / 🚫 Reject buttons in a DM, and ✅ Approve / 🚫 Reject in a group channel; there is no YOLO button (YOLO is owner-only via `!yolo on`) (`_request_approval` in `slack/handler_runtime/permission_ladder.py`; the blocks are `_build_approval_blocks`, `slack/handler_runtime/approvals.py`). When the request's MCP identity is proven (`messaging.renderer.trusted_mcp_identity`: `mcp_identity_trusted` and a server name), the footer names the server and tool beside the title (`mcp_identity_text`, `MCP tool: *<server>* / *<tool>*`), because the title is model-authored and does not say where the call goes. The dashboard mirror (`post_linked_approval`) is passed the permission event's identity fields and builds the same card, and the transport card draws the same line
+3. Handler posts a Block Kit message with ✅ Approve / 🤝 Trust session / 🚫 Reject buttons in a DM, and ✅ Approve / 🚫 Reject in a group channel, with one intentional exception: a Slack Code channel's own session also offers the owner-only **Trust this channel**, behind a confirmation, and only the owner (by identity) can change that channel's approval mode (`docs/request-for-change/rfc-slack-code-channels.md` §3.4); there is no YOLO button (YOLO is owner-only via `!yolo on`) (`_request_approval` in `slack/handler_runtime/permission_ladder.py`; the blocks are `_build_approval_blocks`, `slack/handler_runtime/approvals.py`). When the request's MCP identity is proven (`messaging.renderer.trusted_mcp_identity`: `mcp_identity_trusted` and a server name), the footer names the server and tool beside the title (`mcp_identity_text`, `MCP tool: *<server>* / *<tool>*`), because the title is model-authored and does not say where the call goes. The dashboard mirror (`post_linked_approval`) is passed the permission event's identity fields and builds the same card, and the transport card draws the same line
 4. `events.py` routes `interactive` Socket Mode event to `interactions.dispatch()`
 5. Approval/rejection sent to ACP, streaming resumes or stops
 6. Approval button message replaced with outcome text
@@ -1931,8 +1932,8 @@ reads the proxy env vars itself) logs a warning and the gateway
 continues in **dashboard-only mode** instead of crashing the whole process.
 Only ordinary `Exception`s are swallowed; `CancelledError` (BaseException)
 still propagates so real task cancellation is not masked. There is no
-background retry of the initial connect — Slack DM stays disabled until the
-next gateway restart. The "connected to Slack" banner prints only after a
+background retry of the initial connect — Slack DM stays disabled until a
+Reconnect (`POST /api/slack/reconnect`) or the next gateway restart. The "connected to Slack" banner prints only after a
 confirmed connect. An exception carrying a `status_reason` (the SOCKS proxy
 error below) shows that text on the settings badge instead of its class name.
 
@@ -2265,6 +2266,95 @@ the hooks never fire, and `kirocrew-core` lists none of the tools.
   dashboard. An archived channel's turns fire no hooks. A second click finds the channel archived
   and archives nothing. SEL: `slack.code_channel.wrap_up`,
   `slack.code_channel.archive`.
+- **Approval cards.** A code channel's own session posts its tool-approval card
+  top-level in the channel, where its replies go: `_run_chat` takes the card's
+  thread from `binding.mirror_post_thread`, the mirror's own rule, so every other
+  linked thread keeps threading. Such a card adds a secondary **Trust this
+  channel** button (Approve stays the one primary). A click is routed by
+  `interactions.dispatch` after its owner check and the `channels` inbound
+  ceiling to `approval_picker.handle_trust_call`, which accepts only a card the
+  channel's own session posted, applies the code-channel command gates (bound
+  workspace, owner, channel and origin admit the bot, not archived), then puts
+  the session on Trust through `apply_approval_mode` -- the dashboard picker's
+  mutation, its sweep approving the waiting call and its `mode_change:trust` row
+  naming `slack-code-channels:<user>` -- and posts one warning line in the
+  channel. No approval store of its own. SEL: `slack.code_channel.approval_mode`.
+- **Approval mode from the channel.** `agent_picker.kickoff_blocks` draws an
+  **Approval mode** `static_select` (Normal / Reads / Trust, the dashboard's names) below the agent picker,
+  preselected with `approval_picker.current_mode` of the session (the configured
+  starting mode at bind; the kickoff is re-drawn when the session did not take it),
+  with a context line (`approval_picker.MODES_NOTE`) saying what each mode does. The
+  select carries no `confirm` (Block Kit confirms a select as a whole and could not
+  name the pick): a pick of Reads or Trust that changes the mode only posts the owner
+  an ephemeral (`approval_picker.confirm_blocks`) whose button names the mode; its
+  value pins the mode, the channel's session and the time asked
+  (`CONFIRM_TTL_SECS`), and `approval_picker.handle_confirm` refuses a stale one.
+  Normal applies straight from the select.
+  A pick (`approval_picker.handle_select`, then `handle_confirm`, both routed through
+  `worker_approvals.dispatch_card_click`) and `/kirocrew approval [normal|reads|trust]` (a
+  `commands.handle_slash` sub-command beside `agent`; bare shows the mode; outside a
+  code channel it is not a sub-command and falls to the help text) both pass `agent_picker.authorize` and run
+  `approval_picker.set_channel_mode`, i.e. `apply_approval_mode`; the kickoff is
+  re-drawn with who set it and Trust posts the warning line. While the YOLO override is
+  on, a pick is never answered as unchanged (Normal must reach `apply_approval_mode` to end
+  it), the reply says when it ended, and the kickoff carries a YOLO line.
+- **Worker approvals.** A prompt raised in a session the channel's CURRENT session
+  created (`_created_by`, resolved back through `surface.binding_for_slot`; not
+  Slack-linked itself; feature on; channel not archived) is relayed by
+  `worker_approvals.relay` from `_run_chat`, top-level in the channel, headed with
+  the worker's redacted, mrkdwn-escaped title; the tool and arguments take the same
+  outbound redaction as every card. Approve / Reject / Trust this channel are its own
+  action ids, routed by `interactions.dispatch` after its owner check and the
+  `channels` inbound ceiling and the per-channel policy (`allowed_channel_ids`, via
+  `worker_approvals.dispatch_card_click`) to `worker_approvals.handle_click`, which
+  re-checks the lineage live, applies the code-channel gates and resolves the
+  worker's own future with `state.resolve_slot_approval` pinned to the future the
+  card was posted for (never a state-wide id lookup). A raise reaches workers only
+  through the channel session's own grant: `apply_approval_mode`'s creator-mode
+  cascade (`approval_inheritance`) decides which inheriting workers follow and sweeps
+  their prompts; `set_channel_mode` raises no worker itself. A channel mode change
+  (from either card, the kickoff select or the command) then only LOWERS: each of
+  `worker_approvals.live_workers` (the same `_created_by` lineage, direct children
+  only, not Slack-linked) still above the new mode, audited per worker
+  (`result=worker_set`), and every deeper session in the `_created_by` tree
+  (`worker_approvals.descendants`, linked ones included, audited `depth=deeper`),
+  which inherited the grant at creation; the reply names any worker it could not
+  change (the kickoff select says so ephemerally). Known limit: the walk follows live
+  `_created_by` links, so a session whose creator already closed is orphaned from the
+  tree and keeps its mode. Every Slack control applies the per-channel policy
+  (`allowed_channel_ids`): at dispatch, in `agent_picker.authorize` (refused
+  silently, so nothing is written into a refused channel) and again at each commit in
+  `agent_picker._sync_gates`. Any change but to Normal needs the channel open
+  (`_channel_open`: feature on, not fenced, no stored archive stamp) and re-runs
+  `agent_picker`'s owner gates (`_still_admitted` after the lock, `_sync_gates` at
+  each grant's commit), Trust to Reads included, since a slot put on Reads cascades
+  Reads onto inheriting sessions on Normal; only Normal never waits on them. Every
+  slot's transcript window is loaded off the loop (`agent_picker._load_window`)
+  before its grant, as the agent switch does, and a raise whose descendant window
+  cannot be loaded changes nothing. Each grant is fenced right before the mutation: the
+  channel not archived here, the feature on, the same channel session, the same
+  worker object; a worker card is relayed only where the channel's own prompt would
+  post (mirror not paused, channel and origin admit the bot, no Slack Stop); a raise to Trust answers their pending prompts and the
+  channel's own through that call's slot-scoped sweep, and the cards are re-written in
+  place ("Ran under Trust"; the channel's own are kept from `_run_chat`'s delete via
+  `approval_picker.keep_card`). Only a card whose exact future (captured before any
+  await) was still waiting at the grant's last fence, and is approved after it, says
+  it ran under Trust, and only those are kept from the runner's delete (added after
+  the sweep, never before the await); a channel card answered another way meanwhile
+  is deleted as usual. A claimed worker card answered elsewhere says only what
+  happened (`worker_approvals.CLAIMED_ENDED`), and one its own click answered keeps
+  that click's line. Every
+  rewrite sends replacement blocks (`approval_picker.settled_blocks`), since
+  `chat.update` keeps a message's buttons when no blocks are sent. `ask_question` cards wait in `_question_futures`,
+  which no sweep reads, so they are never answered. A Trust click on either card changes no mode unless the
+  card's prompt is still waiting right before the mutation. `_run_chat` starts the
+  relay as a task (no await between the future's registration and its `try`) and its
+  `finally` calls `worker_approvals.finish`, which updates the card in place
+  (approved / declined in the dashboard, timed out, or ended by the host) unless a
+  click already did. Code-channel cards escape mrkdwn entities in the footer and the
+  tool arguments, and show a JSON input's `command` once (its own code block, the
+  other arguments as JSON only when there are any, and no command in the lock line).
+  SEL: `slack.code_channel.worker_approval`.
 
 ## Dependencies
 

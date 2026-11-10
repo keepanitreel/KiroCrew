@@ -637,7 +637,6 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         GATE_ENVELOPE_MARKER,
         STRANDS_BUILTIN_TOOL_KINDS,
         STRANDS_SIDE_READ_ONLY_REFUSAL,
-        UNREADABLE_IDENTITY_REASONS,
         StrandsCallIdentity,
         _anchored_in_workspace,
         _envelope_mcp_owner,
@@ -804,7 +803,13 @@ def parse_usage_update(update: dict[str, Any]) -> tuple[int | float | None, int 
                 used = nested.get("used")
             if size is None:
                 size = nested.get("size")
-    return _token_count(used), _token_count(size)
+    used, size = _token_count(used), _token_count(size)
+    # A negative count is no reading: it would make context_pct negative, which
+    # every metadata path clamps out, and a reader keyed on the 0-100 range
+    # (Telegram's context gauge) has no bucket for it.
+    if used is not None and used < 0:
+        used = None
+    return used, size
 
 
 def parse_usage_cost(update: dict[str, Any]) -> float | None:

@@ -2068,6 +2068,16 @@ adding a parallel watcher (see `kiro_crew.knowledge.artifact_ingest`):
   **unconditionally**, comparing the artifact store against
   `artifact_item_state`: ingest what is missing or changed, drop state for
   artifacts that no longer exist. `created` is now reported for logging only.
+  The pass runs as the sync's own task, and `ArtifactKnowledgeSync.stop()`
+  asks it to end at its next artifact boundary: `_stop_artifact_ingest`
+  calls it both when `knowledge.auto_ingest_artifacts` is switched off and
+  at app exit (`on_cleanup`, registered before the knowledge pools shut
+  down), so a pass never outlives the sync that started it by more than the
+  artifact in hand. `stop()` neither cancels nor waits: a cancel mid-ingest
+  skips finalize and strands committed chunks that no artifact owns, and a
+  wait would hold the live-config applier's timeout or the 10 s graceful
+  shutdown on an LLM-backed ingest. The artifact in hand at exit can still
+  be cut short by the pool shutdown, as before this stop existed.
   - **Converged is free.** `ingest_artifact` already skips unchanged content, so
     the steady state spends no extraction calls and logs at debug.
   - **Removals are judged against every artifact, not the eligible kinds.**
@@ -2309,6 +2319,12 @@ dashboard's active slot, so `ArtifactChatPanel` keeps it on the bound session wi
 `useOwnSlotChat` (`website/src/hooks/useOwnSlotChat.ts`): it switches to the bound
 session and shows the chat only while that session is the active slot. Another
 session made active while the panel is open (a transcript link) is switched back.
+A run of switch-backs each less than `SWITCH_BACK_GAP_MS` after the one before
+stops after `MAX_SWITCH_BACKS`: the panel logs a console warning and switches
+back no more for that session, showing no chat, so two such panels on different
+sessions stop taking the active slot from each other. A switch-back after a
+quieter gap starts a new run; handing the panel a different session, or
+remounting it, clears the cap.
 A 404 from the switch, or a confirmed close of the session, takes the row out of
 the slot list (`armConfirmedCloseHold` then `removeSlotOptimistic`, as archiving a
 gone session does), so the page resolves the next bound session or offers **Start

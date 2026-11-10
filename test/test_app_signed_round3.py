@@ -343,6 +343,72 @@ def test_node_provisioning_preserves_enablement_across_restart(
     assert (spawn_root / "package-lock.json").exists() is (not policy)
 
 
+@pytest.mark.parametrize("nested_lock", [None, "package-lock.json", "npm-shrinkwrap.json"])
+@pytest.mark.parametrize("root_lock", [None, "package-lock.json", "npm-shrinkwrap.json"])
+@pytest.mark.parametrize("policy", [True, False])
+def test_signed_node_install_honours_publisher_lockfile(
+    spawn_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: bool,
+    root_lock: str | None,
+    nested_lock: str | None,
+) -> None:
+    from apps_backend_coverage_helpers import _capture_popen, _StopSpawn
+
+    from kiro_crew.apps import backend
+
+    home = tmp_path / "lock-home"
+    home.mkdir()
+    monkeypatch.setenv("KIROCREW_HOME", str(home))
+    monkeypatch.setattr(admission, "config_dir", lambda: home)
+    if policy:
+        (home / "app_admission.json").write_text(
+            json.dumps({"require_signature": True, "trust_keys": {"test-publisher": SECRET}}),
+            encoding="utf-8",
+        )
+    write_app(spawn_root, backend={"entryPoint": "backend/server.js", "type": "node"})
+    nested = spawn_root / "backend"
+    nested.mkdir()
+    (nested / "server.js").write_text("// test backend\n", encoding="utf-8")
+    locks: dict[Path, bytes] = {}
+    for pkg_dir, lock in ((spawn_root, root_lock), (nested, nested_lock)):
+        (pkg_dir / "package.json").write_text('{"name": "probe"}', encoding="utf-8")
+        if lock:
+            body = json.dumps({"lockfileVersion": 3, "pinned": pkg_dir.name}).encode()
+            (pkg_dir / lock).write_bytes(body)
+            locks[pkg_dir / lock] = body
+    manifest = sign(spawn_root)
+    monkeypatch.setattr(admission, "_installed_root", lambda n: spawn_root)
+    monkeypatch.setattr(backend, "_find_node_binary", lambda: "/test/node")
+    monkeypatch.setattr(backend, "_find_npm_binary", lambda: "/test/npm")
+    commands: dict[Path, list[str]] = {}
+
+    def npm(argv, **kwargs):
+        cwd = Path(kwargs["cwd"])
+        commands[cwd] = argv
+        if argv[1] == "install" and "--no-package-lock" not in argv:
+            (cwd / "package-lock.json").write_text("{}", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(backend, "run_limited", npm)
+    _capture_popen(monkeypatch)
+    with pytest.raises(_StopSpawn):
+        backend._start_app_backend_body("probe", manifest)
+
+    layout = ((spawn_root, root_lock), (nested, nested_lock))
+    assert list(commands) == [spawn_root.resolve(), nested.resolve()]
+    for (_, lock), argv in zip(layout, commands.values()):
+        assert argv[1] == ("ci" if policy and lock else "install")
+        assert ("--no-package-lock" in argv) is (policy and not lock)
+    if policy:
+        for path, body in locks.items():
+            assert path.read_bytes() == body
+        for pkg_dir, lock in layout:
+            if not lock:
+                assert not (pkg_dir / "package-lock.json").exists()
+
+
 def test_uninstall_removes_child_cache(signed_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from kiro_crew.apps import manager
     from kiro_crew.apps.manager_records import InstalledApp

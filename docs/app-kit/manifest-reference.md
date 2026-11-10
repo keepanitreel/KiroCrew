@@ -121,8 +121,11 @@ before a backend, lifecycle script or hook module runs and before its agents,
 skills, crons and MCP servers are registered. A file added, removed or changed
 anywhere in the package refuses the app, naming the file. That includes a change
 an install-time build or `onInstall` makes, so a signed app ships its built
-output in the signed tree. Signed Node apps ship their final lockfile; backend
-npm provisioning suppresses lockfile writes under the signature policy.
+output in the signed tree. Signed Node apps ship their final lockfile. Under the
+signature policy, backend npm provisioning runs `npm ci` where a
+`package-lock.json` or `npm-shrinkwrap.json` sits, so its pins and integrity
+hashes apply, and `npm install --no-package-lock` where none does; neither
+writes a lockfile.
 Signed hook modules and normal app imports, including top-level `sys.path`
 imports, compile from bytes that match their signed source digest. Before each
 signed hook load, every in-tree `__pycache__` directory is removed during off-loop
@@ -1619,8 +1622,10 @@ never copies `node_modules`. Before the backend starts, the gateway runs
 entry point's own that has a `package.json` and no `node_modules`. So an
 `entryPoint` of `backend/dist/server.js` with its `package.json` in `backend/`
 gets `backend/node_modules`. This is how a local-path install gets its npm
-dependencies, since `setup.onInstall` does not run for one. A failed
-`npm install` is logged as a warning and the backend starts anyway.
+dependencies, since `setup.onInstall` does not run for one. Under the
+signature policy a directory with a lockfile gets `npm ci --production`
+instead, which fails rather than install outside the lockfile's pins. A failed
+npm run is logged as a warning and the backend starts anyway.
 
 App backends are accessible through the Gateway's reverse proxy at
 `/apps/{name}/api/{path}`, which avoids CORS issues for dashboard UI pages.

@@ -1868,11 +1868,19 @@ value comes back different from the unbounded coercion, the read logs a WARNING
 naming the DTO, the key, the stored value and the value used. `load()` runs the
 builders on every call, so each DTO, key and value warns once per disk read of the
 config files (`_REPORTED_CLAMPS`, cleared by `read_config_document` beside the
-validation that warns on the same read). A clamp outside `read`'s bounds is not
-reported this way: a coercer of its own (`_clamp_compact_wait_secs`,
-`_title_refresh_every_turns`), a direct `_safe_*` call, a `max()` or `min()` around a
-read, or a DTO's `__post_init__`; `_clamp_security_bounds` reports the fields it
-lists before the builders run. A `default_factory` field gives a
+validation that warns on the same read). A builder states a floor or ceiling as
+`read`'s bounds rather than as a `max()` or `min()` around the read or a clamp in the
+DTO's `__post_init__`, so the warning covers it. A coercer that clamps on its own
+passes `unclamped=`, the same reading without its clamp, and the read compares
+against that instead: `_clamp_compact_wait_secs`, `_title_refresh_every_turns` and the
+one `_crew_autocompact_pct` reads with (each keeps `0` as "use the default"), and the
+one for `knowledge.extraction_pool_size`. `_clamp_security_bounds` reports the fields
+it lists before the builders run, so those reach their builders in range, and
+`_load_background_hold_secs` logs its own clamp.
+Still clamped outside `read` and not reported: the channel
+`soft_threshold_pct`/`hard_threshold_pct` pair, a WhatsApp group's `cooldown_s`,
+`messaging.idle_reset_minutes` and `daily_reset_hour`, and the `agent` start widths
+(`session_start_concurrency` and its two siblings). A `default_factory` field gives a
 fresh value on each read, and a key with no field raises `KeyError`. A DTO's own
 `__post_init__`, `from_raw` or `from_dict`, and a reader a builder calls (the MCP
 stub-override reader `_resolve_stub_overrides`, `_tailscale_config_from`,
@@ -2319,7 +2327,8 @@ later, and the first signal after the window starts normally. (The window double
 up to a 300s ceiling, which only a larger cap would reach.) After 3 failures in a row (`_EAGER_SPAWN_FAILURE_CAP`),
 background starts for that slot stay **off until a start succeeds or the gateway
 restarts**. `schedule_eager_spawn` refuses the slot, and the stop is logged once
-at ERROR and posted once as an error row in the chat. The row's last-error text
+at ERROR and posted once as an error row in the chat (a policy-blocked start,
+below, posts none). The row's last-error text
 is redacted and bounded to 500 characters. The user's next message still starts
 the agent, and its success clears the count. The count lives only on the
 in-memory `_ChatSlot`, so a gateway restart starts it at zero.
@@ -2331,7 +2340,11 @@ speculative-resume refusal, or a capability refusal raised before any process ra
 (`CapabilityError`, or a `CapabilityStartupError` code in
 `_PRE_SPAWN_CAPABILITY_CODES`). A failed pending-reset consume, binding or
 selection write, or admission step spawned no agent and is logged without
-counting. Pinned by `test/test_eager_spawn_start_backoff.py`.
+counting. A start Windows policy refused (`AcpSpawnBlocked`, read by its
+`windows_spawn_blocked` tag) goes to the cap at its first failure, logged at ERROR
+and with no stop row of its own: every retry meets the same policy, and the user's next
+message shows the policy card itself. Pinned by
+`test/test_eager_spawn_start_backoff.py`.
 
 `register_app` (`apps/bridges_register.py`) backs the from-source recovery with a **visible
 error**: when a manifest declares agents but `_register_agents` materializes none
@@ -4132,13 +4145,14 @@ closing the direct-config-edit DoS gap.
 `ResourceLimitsConfig` (`config/sections_limits.py`, re-exported by
 `config/loader.py`) carries the kernel confinement ceilings for spawned agent
 processes. It is the one config block whose keys are
-read by more than one enforcement mechanism, and `max_processes` means
+read by more than one enforcement mechanism, and `0` means
 **different things** to two of them:
 
 | Key | POSIX rlimit (`security.apply_resource_limits`) | cgroup v2 scope (`sandbox.cgroup_scope_argv`) | xdist (`resource_status`) |
 |---|---|---|---|
 | `max_open_files` | `RLIMIT_NOFILE`; `0` = leave inherited | — | — |
-| `max_processes` | `RLIMIT_NPROC`; `0` = leave inherited | `TasksMax` (counts THREADS); `0` = use default | — |
+| `max_processes` | - | `TasksMax` (counts THREADS); `0` = use default | - |
+| `max_user_processes` | `RLIMIT_NPROC` (per UID), opt-in; `0` = leave inherited | - | - |
 | `max_memory_mb` | - | `MemoryMax` (resident); `0` = use default | - |
 | `max_address_space_mb` | `RLIMIT_AS` (virtual), opt-in; `0` = leave inherited | - | - |
 | `max_cpu_seconds` | `RLIMIT_CPU`; `0` = leave inherited | — | — |
@@ -4155,8 +4169,8 @@ On Windows a fourth mechanism applies: a Job object attached to each agent spawn
 (`ActiveProcessLimit`) and `max_memory_mb` (`JobMemoryLimit`). The other keys
 (`cpu_weight`, `max_address_space_mb`, `max_cpu_percent`, `max_cpu_seconds`,
 `max_open_files`, `max_total_memory_mb`, `max_total_processes`,
-`scope_memory_high_pct`, `slice_reclaim_trigger_pct`) are accepted but not
-enforced there, and one warning names the ones that are set
+`max_user_processes`, `scope_memory_high_pct`, `slice_reclaim_trigger_pct`) are
+accepted but not enforced there, and one warning names the ones that are set
 (`sandbox._WINDOWS_INERT_RESOURCE_LIMIT_KEYS`).
 
 `max_memory_mb` sets no rlimit. A resident cap must not also cap the address
@@ -4167,6 +4181,13 @@ a cap sized like a memory budget stops them from starting. `max_address_space_mb
 is the opt-in `RLIMIT_AS` for fleets that need a virtual cap anyway, and
 `kirocrew config set` warns when it is given a positive value. The `extractor`
 profile keeps its own fixed `RLIMIT_AS` and reads neither key.
+
+`max_processes` sets no rlimit either. The kernel counts `RLIMIT_NPROC`
+against every process and thread of the gateway's real UID, not one spawn's
+tree, so a value sized as a scope's task budget stops every tool child from
+forking. `max_user_processes` is the opt-in `RLIMIT_NPROC`, for a gateway that
+runs as its own dedicated user. Off Linux and Windows nothing reads
+`max_processes`.
 
 The slice task default is sized once per process from the host
 (`host_task_sizing.host_task_facts`: affinity CPUs, RAM, `kernel.pid_max`,

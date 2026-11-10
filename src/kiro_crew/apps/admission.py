@@ -283,7 +283,9 @@ def verified_installed_manifest(
     the caller is about to execute (the installed ``app.json`` when None), must
     carry a valid signature and the installed tree must match its
     ``fileDigests``; *runs*, a lifecycle script's text, must be one of that
-    manifest's ``setup`` scripts. Blocking: an async caller offloads it.
+    manifest's ``setup`` scripts. Refusals are audited here, including direct
+    calls and calls through :func:`installed_content_refusal`; audit failure
+    never permits execution. Blocking: an async caller offloads it.
     """
     if not signed_tree_applies(name, executed):
         return None, None
@@ -292,13 +294,26 @@ def verified_installed_manifest(
 
         manifest = get_app_manifest(name)
     if manifest is None or not _signature_valid(manifest, load_app_admission_policy()):
-        return f"app {name!r} signature invalid or unsigned", None
-    refusal = signed_content_refusal(name, manifest, _installed_root(name))
+        refusal: Optional[str] = f"app {name!r} signature invalid or unsigned"
+    else:
+        refusal = signed_content_refusal(name, manifest, _installed_root(name))
+        if refusal is None:
+            scripts = {v for v in manifest.setup.to_dict().values() if isinstance(v, str)}
+            if runs is not None and runs not in scripts:
+                refusal = f"app {name!r} script is not one its signed manifest declares"
     if refusal:
+        try:
+            sel().log_api_access(
+                caller="app_admission",
+                operation="installed_content_verification",
+                outcome="denied",
+                source="app",
+                resources=f"app={name!r} executed={str(executed)!r}",
+                error=refusal,
+            )
+        except Exception:
+            logger.debug("installed content denial audit failed", exc_info=True)
         return refusal, None
-    scripts = {v for v in manifest.setup.to_dict().values() if isinstance(v, str)}
-    if runs is not None and runs not in scripts:
-        return f"app {name!r} script is not one its signed manifest declares", None
     return None, manifest
 
 
