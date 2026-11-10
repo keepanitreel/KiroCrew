@@ -369,6 +369,35 @@ async def _mark_first_greeting_owed(name: str, cfg: object) -> None:
     await asyncio.to_thread(mark_welcome_owed, name, config=cfg, kind=WELCOME_KIND_GOAL)
 
 
+def _teammate_create_refusal(body: dict) -> web.Response | None:
+    """The 403 for a teammate's create that sets a Crew-level field, or ``None``.
+
+    A teammate's Bot reaches no more than a teammate's session: it boots the
+    built-in agent spec (``kirocrew``; a spec is the tool grants and MCP servers its
+    sessions run with, so choosing another is the owner's, as editing one is),
+    opens in the default approval mode, and is a
+    person-created Bot (so it is on every teammate's roster). Refused rather than
+    rewritten, so the caller learns which field is the owner's.
+    """
+    owner_fields = []
+    if str(body.get("kiro_agent") or "").strip() != "kirocrew":
+        owner_fields.append("kiro_agent")
+    if body.get("approval_mode"):
+        owner_fields.append("approval_mode")
+    if body.get("source", "kirocrew") != "kirocrew":
+        owner_fields.append("source")
+    if not owner_fields:
+        return None
+    return web.json_response(
+        {
+            "error": "only the Crew owner can set " + ", ".join(owner_fields),
+            "code": "owner_only",
+            "fields": owner_fields,
+        },
+        status=403,
+    )
+
+
 async def api_kirocrew_agents_create(request: web.Request) -> web.Response:
     """POST /api/agents — create a new Kiro Crew agent.
 
@@ -387,10 +416,14 @@ async def api_kirocrew_agents_create(request: web.Request) -> web.Response:
 
 async def _api_kirocrew_agents_create(request: web.Request) -> web.Response:
     """The create itself — see :func:`api_kirocrew_agents_create`."""
+    from kiro_crew.dashboard.handlers.members import _teammate_admitted
 
-    denied = await _require_owner(request, "agent.create")
-    if denied is not None:
-        return denied
+    # A team Crew teammate creates a Bot as they start a session.
+    teammate = await _teammate_admitted(request, "agent.create")
+    if not teammate:
+        denied = await _require_owner(request, "agent.create")
+        if denied is not None:
+            return denied
     try:
         body = await request.json()
     except Exception:
@@ -399,6 +432,10 @@ async def _api_kirocrew_agents_create(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "body must be an object", "code": "body_not_object"}, status=400
         )
+    if teammate:
+        refused = _teammate_create_refusal(body)
+        if refused is not None:
+            return refused
     name = body.get("name", "")
     if not isinstance(name, str):
         return web.json_response(

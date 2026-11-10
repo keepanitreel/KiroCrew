@@ -49,6 +49,18 @@ export function useSharedCrewPeople(enabled = true, { fetchOnMount = true }: { f
   return useQuery({ queryKey: sharedCrewKeys.people, queryFn: () => api.sharedCrewPeople(), enabled, retry: false, refetchOnMount: fetchOnMount, retryOnMount: fetchOnMount })
 }
 
+/** Whether this tab is a team Crew teammate the Kiro relay let in: the People
+ *  read names the viewer, not as the owner, with the relay's provenance. `false`
+ *  until that read says so, so the owner's view never waits on it. Reads the
+ *  cache the session list's creator filter fills rather than fetching again. */
+export function useViewerIsRelayTeammate(): boolean {
+  const caps = useSharedCrewCapabilities({ fetchOnMount: false })
+  const previewOn = sharedCrewPreviewOn(caps.capabilities)
+  const people = useSharedCrewPeople(previewOn && capabilityUsable(caps.capabilities.attribution), { fetchOnMount: false })
+  const viewer = people.data?.people?.find(row => row.is_viewer)
+  return !!viewer && !viewer.is_owner && viewer.provenance === 'kiro_relay'
+}
+
 /** Whether this Crew shows who did what (bylines, decision attribution,
  *  presence), decided the way the session list decides it: only with the
  *  Shared Crew preview on and someone besides the owner joined

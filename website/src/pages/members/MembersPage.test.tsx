@@ -718,6 +718,27 @@ describe('MembersPage thread', () => {
     expect(screen.queryByText(/Could not open this bot's chat/i)).toBeNull()
   })
 
+  it('a relay teammate keeps New bot but finds no Import from file, which stays the owner\'s', async () => {
+    // The People read names the viewer as a relayed teammate, not the owner.
+    const shared = api as unknown as Record<string, unknown>
+    shared.sharedCrewCapabilities = vi.fn(() => Promise.resolve({ schema_version: 1, shared_crew_preview: true, attribution: 'available' }))
+    shared.sharedCrewPeople = vi.fn(() => Promise.resolve({
+      people: [{ principal: { id: 'p_ana', kind: 'human', display: { name: 'Ana', login: '' } }, sources: ['observed'], is_viewer: true, is_owner: false, provenance: 'kiro_relay' }],
+    }))
+    try {
+      const teammateRow = { name: 'oncall', slug: 'oncall', dashboard_created: true, source: 'kirocrew' } as unknown as ReturnType<typeof row>
+      await renderPage([teammateRow])
+      await waitFor(() => expect(shared.sharedCrewPeople).toHaveBeenCalled())
+      fireEvent.pointerDown(await screen.findByTestId('member-add'), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+      const menu = await screen.findByTestId('member-add-menu')
+      expect(within(menu).getByTestId('member-add-crewmate')).not.toHaveAttribute('data-disabled')
+      await waitFor(() => expect(within(menu).queryByTestId('member-add-import')).toBeNull())
+    } finally {
+      delete shared.sharedCrewCapabilities
+      delete shared.sharedCrewPeople
+    }
+  })
+
   it('shows the concrete private memory refusal when opening a member conversation fails', async () => {
     // A remembered member drives the restore that fails here (a fresh visit
     // no longer auto-opens anyone, #11763); the failing POST is that restore.

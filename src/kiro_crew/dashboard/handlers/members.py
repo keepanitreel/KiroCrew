@@ -61,6 +61,8 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _member_names_for_slug,
         _sel,
         _slug_is_claimed_by_any_member,
+        _teammate_admitted,
+        _teammate_reaches_bot,
     )
     from kiro_crew.dashboard.handlers.members_drawer import (  # noqa: F401
         _ACTIVITY_LIMIT,
