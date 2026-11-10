@@ -1404,9 +1404,18 @@ async def stitch_mp3s(paths: list[str], output: str | None = None) -> str | None
     argument) is removed on any unsuccessful exit; a caller-supplied
     ``output`` path is left untouched.
 
-    Windows: ffmpeg is not guaranteed on PATH, so the stitch can return ``None``
-    there; the dashboard caller then completes the request without a replay
-    clip. The Slack thread-upload path is unaffected.
+    The ffmpeg that runs comes from the fixed system and package-manager
+    directories the transcriber trusts (``transcribe._find_system_ffmpeg``),
+    never from the gateway's ambient ``PATH``. This runs in the gateway, outside
+    the agent sandbox, and that ``PATH`` can hold a directory the sandbox can
+    write (``~/.local/bin`` in the service unit). The bundled and stored
+    decoders are not used: they are audio-only builds with no concat demuxer
+    and no MP3 muxer, so they cannot stitch.
+
+    A host with no ffmpeg in those directories (every stock Windows host, and
+    any host whose only ffmpeg is under a user directory) returns ``None``; the
+    dashboard caller then completes the request without a replay clip. The
+    Slack thread-upload path is unaffected.
     """
     if not paths:
         return None
@@ -1433,6 +1442,18 @@ async def stitch_mp3s(paths: list[str], output: str | None = None) -> str | None
     listing: str | None = None
     succeeded = False
     try:
+        # Read through the facade at call time, which is the patch surface
+        # every ffmpeg caller shares. The lookup probes the filesystem, so it
+        # runs off the event loop.
+        from kiro_crew import transcribe
+
+        ffmpeg_bin = await asyncio.to_thread(transcribe._find_system_ffmpeg)
+        if ffmpeg_bin is None:
+            logger.warning(
+                "voice_reply: no ffmpeg in a trusted system directory; "
+                "skipping the replay clip stitch"
+            )
+            return None
         # The chunk paths go in a list file for ffmpeg's concat demuxer, so the
         # command line keeps one length for any chunk count: Windows refuses
         # one over 32,767 characters. Single quotes keep each path literal, and
@@ -1443,7 +1464,7 @@ async def stitch_mp3s(paths: list[str], output: str | None = None) -> str | None
                 quoted = path.replace("'", "'\\''")
                 f.write(f"file '{quoted}'\n")
         proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
+            ffmpeg_bin,
             "-y",
             "-f",
             "concat",
