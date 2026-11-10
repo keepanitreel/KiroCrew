@@ -14,6 +14,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createTestStore } from './helpers'
 import { ThemeProvider } from '../hooks/useTheme'
+import { turnOnCrewModePreview } from './crewModePreview'
 
 const { searchReply, sessionsSearchMock } = vi.hoisted(() => {
   const searchReply: { current: unknown } = { current: null }
@@ -33,6 +34,8 @@ vi.mock('../api/client', async (importOriginal) => {
       setPinnedOrder: vi.fn(async (keys: string[]) => ({ ok: true, order: keys })),
       chatFolders: vi.fn().mockResolvedValue([]),
       chatTags: vi.fn().mockResolvedValue([]),
+      // A Crew Mode root with no workers: nothing needs attention, so its row draws its usual tail.
+      crewWorkers: vi.fn(async (root: string) => ({ root, workers: [] })),
       sessionsSearch: sessionsSearchMock,
     },
   }
@@ -140,6 +143,17 @@ describe('the sidebar while a search is active', () => {
     expect(row('k-dev')?.querySelector('[data-session-search-snippet]')).toBeNull()
   })
 
+  it('shows the snippet on an idle Crew Mode root, whose usual tail is its last message', async () => {
+    turnOnCrewModePreview()
+    SLOTS_OVERRIDE.current = SLOTS.map(s => (s.key === 'k-write' ? { ...s, crew_mode_root: true } : s))
+    renderSidebar()
+    search('memory')
+    await waitFor(() => {
+      expect(row('k-write')?.querySelector('[data-session-search-snippet]')?.textContent).toBe('…each crew keeps its own memory store…')
+      expect(row('k-write')?.textContent ?? '').not.toContain('Your numbering is authoritative')
+    })
+  })
+
   it('shows the server snippet with the query highlighted in place of the last message', async () => {
     renderSidebar()
     search('memory')
@@ -163,6 +177,17 @@ describe('the sidebar while a search is active', () => {
     expect(document.querySelector('[data-folder-row="f-dev"]')).toBeNull()
     expect(row('k-prog')?.querySelector('[data-testid="session-search-folder"]')?.textContent).toBe('Programs')
     expect(row('k-write')?.querySelector('[data-testid="session-search-folder"]')?.textContent).toBe('Writing')
+    // The label sits OUTSIDE the time's `shrink-0` group, as its own truncating item in
+    // front of it: inside, its nowrap text would set the group's width and a long
+    // folder path would clip the time in a narrow sidebar. jsdom has no layout, so the
+    // structure is what is pinned here (the clipping itself is measured in Chromium).
+    const group = row('k-write')!.querySelector('[data-testid="session-row-trailing-meta"]')!
+    const label = row('k-write')!.querySelector('[data-testid="session-search-folder"]')!
+    expect(group.className).toMatch(/\bshrink-0\b/)
+    expect(group.contains(label)).toBe(false)
+    expect(label.nextElementSibling).toBe(group)
+    expect(label.className).toMatch(/\btruncate\b/)
+    expect(label.className).toMatch(/\bmin-w-0\b/)
   })
 
   it('counts the matches above the results', async () => {
@@ -231,6 +256,8 @@ describe('the sidebar while a search is active', () => {
     expect(document.querySelector('[data-testid="session-search-folder"]')).toBeNull()
     // The grouped view is back as it was: the same folders, the same rows in the same order.
     expect({ rows: drawnKeys(), folders: folderRows() }).toEqual(before)
+    // With no folder label the trailing group is the `shrink-0` group rows always drew.
+    expect(row('k-write')!.querySelector('[data-testid="session-row-trailing-meta"]')?.className).toMatch(/\bshrink-0\b/)
     expect(row('k-write')?.textContent).toContain('Your numbering is authoritative')
   })
 })

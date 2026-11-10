@@ -123,6 +123,8 @@ function renderSidebar(opts: {
   /** A reveal request already in the store at mount — the remount case, where a
    *  request set while this sidebar was unmounted is replayed on the way back in. */
   reveal?: { kind: 'session' | 'folder'; target: string; nonce: number }
+  /** The folder sort the gateway config holds (`dashboard.folder_sort`). */
+  folderSort?: 'custom' | 'name' | 'created'
 } = {}) {
   const slots = opts.slots ?? SLOTS
   const folders = opts.folders ?? FOLDERS
@@ -154,6 +156,7 @@ function renderSidebar(opts: {
   } })
   qc.setQueryData(['chat-folders'], folders)
   qc.setQueryData(['tag-columns'], opts.columns ?? [])
+  if (opts.folderSort) qc.setQueryData(['kirocrewConfig'], { dashboard: { folder_sort: opts.folderSort } })
   const view = render(
     <QueryClientProvider client={qc}>
       <Provider store={store}>
@@ -580,6 +583,19 @@ describe('chat sidebar — what a folder-name match looks like', () => {
     const hit = utils.container.querySelector('[data-search-folder-hit="f-nested"]')
     expect((hit?.textContent || '').replace(/\s+/g, '')).toBe('SydneyProperty›Inspections1')
     expect(hit?.querySelector('mark')?.textContent).toBe('Inspect')
+  })
+
+  it('lists matched folders in the folder sort the person chose', async () => {
+    // Stored order puts Development first; "By name" puts Design first.
+    const folders: ChatFolder[] = [
+      { id: 'f-dev', name: 'Development', collapsed: false, order: 0 },
+      { id: 'f-des', name: 'Design', collapsed: false, order: 1 },
+    ]
+    const ids = () => [...utils.container.querySelectorAll('[data-search-folder-hit]')].map(el => el.getAttribute('data-search-folder-hit'))
+    const utils = renderSidebar({ folders, slots: [], folderSort: 'name' })
+    typeSearch(utils, 'de')
+    await waitFor(() => expect(ids()).toHaveLength(2))
+    expect(ids()).toEqual(['f-des', 'f-dev'])
   })
 
   it('leaves the search and reveals the folder when its row is pressed', async () => {

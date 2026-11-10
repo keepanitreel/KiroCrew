@@ -954,7 +954,7 @@ function ChatSidebar({
         scan={slotSearch?.scan ?? null}
       />
       <SearchFolderHits
-        folders={folders} query={slotFilter} matchIds={folderNameMatchIds} isFolderHidden={isFolderHidden}
+        folders={folders} sortMode={folderSortMode} query={slotFilter} matchIds={folderNameMatchIds} isFolderHidden={isFolderHidden}
         rows={flatSlots} folderOf={sidebarRows.folderOf}
         onOpen={id => { setSlotFilter(''); dispatch(requestFolderReveal(id)) }}
       />

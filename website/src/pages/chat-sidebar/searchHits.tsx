@@ -8,7 +8,7 @@ import ErrorNotice from '../../components/ErrorNotice'
 import FolderGlyph from '../../components/FolderGlyph'
 import { ROW_STATUS_CLS } from '../../components/listShell'
 import { substringIndices } from '../../utils/fuzzyMatch'
-import { collectFolderSubtreeIds, folderNameText, orderFoldersWithPaths } from '../../utils/folderTree'
+import { collectFolderSubtreeIds, folderNameText, orderFoldersWithPaths, type FolderSortMode } from '../../utils/folderTree'
 import { highlightText } from '../../utils/highlightText'
 import type { ChatFolder } from '../../types'
 import { fmtNumber } from '../../i18n/format'
@@ -78,15 +78,37 @@ export function SearchHitTail({ slot, tail, preview, dot }: {
 }
 
 /** The folder a search row is filed in, as a small label beside its time. The
- *  query is highlighted in it, which is how a row found by its folder's NAME says so. */
+ *  query is highlighted in it, which is how a row found by its folder's NAME says so.
+ *
+ *  It is the one shrinkable item in the row's trailing meta group (see
+ *  {@link RowTrailingMeta}). */
 export function SearchFolderLabel({ slot }: { slot: Slot }) {
   const search = useContext(SidebarSearchContext)
   const label = search?.folderLabelOf(slot)
   if (!search || !label) return null
   return (
-    <span className="text-muted font-normal truncate max-w-[10rem]" title={label} data-testid="session-search-folder">
+    <span className="ml-auto text-muted font-normal truncate min-w-0 max-w-[10rem]" title={label} data-testid="session-search-folder">
       <Highlighted text={label} indices={substringIndices(search.query, label)} />
     </span>
+  )
+}
+
+/** The row's trailing meta group (time, markers): always the `shrink-0` group every
+ *  row has drawn, so the time and markers are never squeezed. During a search the
+ *  folder label sits IN FRONT of it as its own flex item, taking the `ml-auto` that
+ *  pushes the pair to the end. Inside the group the label's nowrap text would set the
+ *  group's width and push the time off a narrow row; beside it, the label shrinks
+ *  with the row's other truncating text (tags) and the group keeps its floor. */
+export function RowTrailingMeta({ slot, children }: { slot: Slot; children: ReactNode }) {
+  const search = useContext(SidebarSearchContext)
+  const labelled = !!search?.folderLabelOf(slot)
+  return (
+    <>
+      {labelled && <SearchFolderLabel slot={slot} />}
+      <span className={`${labelled ? '' : 'ml-auto '}inline-flex items-center gap-1 shrink-0`} data-testid="session-row-trailing-meta">
+        {children}
+      </span>
+    </>
   )
 }
 
@@ -97,8 +119,10 @@ export function SearchFolderLabel({ slot }: { slot: Slot }) {
  * folder's path with the matched letters marked, and how many of the results sit in
  * its subtree; pressing it leaves the search and reveals the folder in the list.
  */
-export function SearchFolderHits({ folders, query, matchIds, isFolderHidden, rows, folderOf, onOpen }: {
+export function SearchFolderHits({ folders, sortMode, query, matchIds, isFolderHidden, rows, folderOf, onOpen }: {
   folders: readonly ChatFolder[]
+  /** The person's folder sort, so these rows read in the order the tree draws. */
+  sortMode: FolderSortMode
   query: string
   matchIds: ReadonlySet<string> | null
   isFolderHidden: (f: ChatFolder) => boolean
@@ -108,7 +132,7 @@ export function SearchFolderHits({ folders, query, matchIds, isFolderHidden, row
 }) {
   const q = query.trim().toLowerCase()
   if (!matchIds || !q) return null
-  const hits = orderFoldersWithPaths(folders).filter(({ folder }) =>
+  const hits = orderFoldersWithPaths(folders, sortMode).filter(({ folder }) =>
     matchIds.has(folder.id) && !isFolderHidden(folder) && folderNameText(folder).toLowerCase().includes(q))
   if (hits.length === 0) return null
   return (
