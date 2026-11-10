@@ -60,6 +60,9 @@ class _Client:
     def mcp_session_report(self):
         return None
 
+    def set_mcp_sign_in_ended_hook(self, hook):
+        pass
+
 
 def _turn(slot: _ChatSlot, session_id: str = "sess-1", state=None):
     return SimpleNamespace(client=_Client(session_id), slot=slot, state=state or _State())

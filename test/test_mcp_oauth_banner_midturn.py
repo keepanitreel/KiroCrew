@@ -43,6 +43,9 @@ class _Client:
     def mcp_session_report(self):
         return None
 
+    def set_mcp_sign_in_ended_hook(self, hook):
+        self.ended_hook = hook
+
 
 def _turn(slot: _ChatSlot):
     return SimpleNamespace(client=_Client(), slot=slot, state=_State())
@@ -115,6 +118,44 @@ async def test_banner_of_a_dead_child_expires_tagged(tmp_path, monkeypatch):
     assert meta["expired"] is True
     assert "oauth_url" not in meta
     assert meta["card_owned"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_ended_sign_in_attempt_withdraws_its_link_and_the_next_offer_is_live(
+    tmp_path, monkeypatch
+):
+    """A KAS attempt that ends unconnected closes its callback listener, so the link
+    it showed is dead. The hook the arm installs withdraws it, open tabs
+    included, and the next offer for the server draws a live card."""
+    _own(tmp_path, monkeypatch, {})
+    slot = _ChatSlot("s1")
+    turn = _turn(slot)
+    await _on_mcp_oauth_request(turn, _event("figma"))
+    turn.client.ended_hook("figma")
+    ended = slot.messages[0]["meta"]
+    assert (ended["expired"], ended["expired_reason"]) == (True, "attempt_ended")
+    assert "oauth_url" not in ended
+    kind, payload = turn.state.broadcasts[-1]
+    assert (kind, payload["meta"]["oauth_url"]) == ("chat_message_update", "")
+    await _on_mcp_oauth_request(turn, _event("figma"))
+    assert slot.messages[1]["meta"]["oauth_url"] == _event("figma").oauth_url
+    assert "superseded" not in slot.messages[0]["meta"]
+
+
+@pytest.mark.asyncio
+async def test_a_late_success_still_turns_an_ended_attempts_card_green(tmp_path, monkeypatch):
+    """The server connecting after its attempt ended is still a sign-in."""
+    _own(tmp_path, monkeypatch, {})
+    slot = _ChatSlot("s1")
+    turn = _turn(slot)
+    await _on_mcp_oauth_request(turn, _event("figma"))
+    turn.client.ended_hook("figma")
+    _mark_mcp_oauth_completed(turn.state, slot, "figma", success=False, error="late")
+    assert "failed" not in slot.messages[0]["meta"]
+    _mark_mcp_oauth_completed(turn.state, slot, "figma", success=True)
+    meta = slot.messages[0]["meta"]
+    assert meta["completed"] is True
+    assert "expired" not in meta and "expired_reason" not in meta
 
 
 @pytest.mark.asyncio

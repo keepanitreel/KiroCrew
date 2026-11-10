@@ -168,6 +168,7 @@ _MEMBERS: dict[str, tuple[str, object, str, str]] = {
     "session_activity_at": ("property", False, "c2eec8a41739", "acp"),
     "session_id": ("property", False, "bb418bb7ece8", "acp"),
     "set_delete_delay": ("function", False, "ef2ab8d662c5", "acp"),
+    "set_mcp_sign_in_ended_hook": ("function", False, "1ad470964708", "acp"),
     "set_model": ("function", True, "9c3df1e3fc63", "acp_model_effort"),
     "set_work_dir_claim_probe": ("function", False, "5fa0fa7a5959", "acp_lifecycle"),
     "settings_withheld_cause": ("function", False, "bb418bb7ece8", "acp"),

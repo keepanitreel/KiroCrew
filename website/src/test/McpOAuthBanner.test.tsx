@@ -290,6 +290,20 @@ describe('renderMcpOAuthMessage', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
+  it('says an attempt that ended unconnected timed out, with no link', () => {
+    // KAS keeps an attempt's callback listener open for its connect timeout only,
+    // so its link is dead once the backend marks the row ended. The copy
+    // names the way back: only a message naming the server offers a fresh link.
+    const node = renderMcpOAuthMessage(
+      makeMsg({ server_name: 'figma', expired: true, expired_reason: 'attempt_ended' }),
+    )
+    render(<>{node}</>)
+    expect(screen.getByText(/timed out/i)).toBeInTheDocument()
+    expect(screen.getByText(/Name this server in a message/i)).toBeInTheDocument()
+    expect(screen.queryByText(/session that started it ended/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
   it('renders expired even when the stored row still carries a url', () => {
     // A tab holding a pre-retirement row merges the patch over it, so both keys
     // can be present at once. The flag must win, or the dead link comes back.

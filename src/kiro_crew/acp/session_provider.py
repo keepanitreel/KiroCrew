@@ -575,6 +575,10 @@ class AcpSessionProvider(LLMProvider):
             self._handle.answer_elicitation(request_id, action, content, person=person)
         )
 
+    def set_mcp_sign_in_ended_hook(self, hook: Callable[[str], None]) -> None:
+        """See LLMProvider. Installed on the runtime for this provider's current session."""
+        self._runtime.set_mcp_sign_in_ended_hook(self._handle.session_id, hook)
+
     async def release_runtime_lease(self) -> None:
         """Give up this provider's lease on the runtime, if it holds one.
 
